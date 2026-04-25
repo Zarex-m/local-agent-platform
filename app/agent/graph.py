@@ -8,8 +8,8 @@ from app.agent.node import (
     finalize_task,
 )
 from langgraph.graph import StateGraph, START, END
-
-
+from langgraph.checkpoint.memory import MemorySaver
+checkpoint = MemorySaver()
 
 
 
@@ -38,4 +38,4 @@ graph.add_conditional_edges(
     }
 )
 
-app=graph.compile()
+app=graph.compile(checkpointer=checkpoint)

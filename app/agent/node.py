@@ -4,7 +4,7 @@ import json
 import os
 from dotenv import load_dotenv
 from app.tools.registry import TOOL_REGISTRY, get_tools_text
-
+from langgraph.types import interrupt
 load_dotenv()
 
 # 导入env
@@ -109,12 +109,26 @@ def check_approval(state: AgentState) -> dict:
     risk_level = tool_info.get("risk_level", "low")
 
     if risk_level == "high":
-        return {
-            "approved": False,
-            "approval_required": True,
-            "approval_reason": f"工具 {tool_name} 风险等级为 high，需要用户审批",
-            "status": "pending_approval",
+        decision=interrupt({
+            "tool_name": tool_name,
+            "tool_input": state.get("tool_input", {}),
+            "risk_level": risk_level,
+            "reason": f"工具 {tool_name} 风险等级为 high，需要用户审批",
         }
+        )
+        if decision.get("approved"):
+            return {
+            "approved": True,
+            "approval_required": False,
+            "approval_reason": None,
+            "status": "approved",
+        }
+        return {
+                "approved": False,
+                "approval_required": True,
+                "approval_reason":"用户拒绝了高风险工具的使用",
+                "status": "rejected",
+            }
 
     return {
         "approved": True,
