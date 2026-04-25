@@ -44,6 +44,13 @@ def plan_task(state: AgentState) -> dict:
     return {
         "plan": plan.content.split("\n"),
         "status": "planned",
+        "step_logs":[
+            {
+                "node":"plan_task",
+                "message":"生成任务计划",
+                "status":"planned"
+            }
+        ]
     }
 
 
@@ -92,12 +99,26 @@ def select_tool(state: AgentState) -> dict:
             "selected_tool": "mock_tool",
             "tool_input": {},
             "status": "tool_selected",
+            "step_logs":[
+                {
+                    "node":"select_tool",
+                    "message":"不需要真实工具，选择 mock_tool",
+                    "status":"tool_selected"
+                }
+            ]
         }
 
     return {
         "selected_tool": result.get("selected_tool", "mock_tool"),
         "tool_input": result.get("tool_input", {}),
         "status": "tool_selected",
+        "step_logs":[
+            {
+                "node":"select_tool",
+                "message":f"选择工具 {result.get('selected_tool', 'mock_tool')}",
+                "status":"tool_selected"
+            }
+        ]
     }
 
 def check_approval(state: AgentState) -> dict:
@@ -122,12 +143,26 @@ def check_approval(state: AgentState) -> dict:
             "approval_required": False,
             "approval_reason": None,
             "status": "approved",
+            "step_logs":[
+                {
+                    "node":"check_approval",
+                    "message":f"用户批准执行高风险工具 {tool_name}",
+                    "status":"approved"
+                }
+            ]
         }
         return {
                 "approved": False,
                 "approval_required": True,
                 "approval_reason":"用户拒绝了高风险工具的使用",
                 "status": "rejected",
+                "step_logs":[
+                    {
+                        "node":"check_approval",
+                        "message":f"用户拒绝执行高风险工具 {tool_name}",
+                        "status":"rejected"
+                    }
+                ]
             }
 
     return {
@@ -135,9 +170,16 @@ def check_approval(state: AgentState) -> dict:
         "approval_required": False,
         "approval_reason": None,
         "status": "approved",
+        "step_logs":[
+            {
+                "node":"check_approval",
+                "message":f"工具 {tool_name} 风险等级为 {risk_level}，无需审批",
+                "status":"approved"
+            }
+        ]
     }
 
-def execute_tool(state: AgentState) -> AgentState:
+def execute_tool(state: AgentState) -> dict:
     """
     执行选中的工具，获取结果
     """
@@ -161,6 +203,13 @@ def execute_tool(state: AgentState) -> AgentState:
     return {
         "tool_output": tool_output,
         "status": "tool_executed" if tool_output.get("success") else "failed",
+        "step_logs":[
+            {
+                "node":"execute_tool",
+                "message":f"执行工具 {tool_name}，结果：{tool_output}",
+                "status":"tool_executed" if tool_output.get("success") else "failed"
+            }
+        ]
     }
 
 def finalize_task(state: AgentState) -> dict:
@@ -206,6 +255,13 @@ def finalize_task(state: AgentState) -> dict:
     return {
         "final_response": final_response,
         "status": "completed" if tool_output.get("success") else "failed",
+        "step_logs":[
+            {
+                "node":"finalize_task",
+                "message":f"生成最终响应，状态：{'completed' if tool_output.get('success') else 'failed'}",
+                "status":"completed" if tool_output.get("success") else "failed"
+            }
+        ]
     }
 
 #路由函数

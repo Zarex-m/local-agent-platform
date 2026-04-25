@@ -1,6 +1,7 @@
 from typing import Any,Optional
 from typing_extensions import TypedDict
-
+from typing_extensions import Annotated
+import operator
 
 class AgentState(TypedDict,total=False):
     Task:str
@@ -11,7 +12,11 @@ class AgentState(TypedDict,total=False):
     tool_output:dict #工具结果
     final_response:str 
     error:str|None
+    
     #审批相关
     approved: bool
     approval_required: bool
     approval_reason: str | None
+    
+    #日志
+    step_logs: Annotated[list[dict], operator.add]
