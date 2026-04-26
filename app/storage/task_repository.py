@@ -95,7 +95,9 @@ def get_step_logs(task_id: int) -> list[StepLog]:
             .where(StepLog.task_id == task_id)
             .order_by(StepLog.id)
         )
+
         return db.execute(stmt).scalars().all()
 
     finally:
         db.close()
+

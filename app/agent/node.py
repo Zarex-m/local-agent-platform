@@ -61,7 +61,9 @@ def select_tool(state: AgentState) -> dict:
     tools_text=get_tools_text()
 
     prompt = f"""
-你是一个工具选择器。
+你是一个严格的 Agent 工具选择器。
+
+你的任务是根据用户任务和执行计划，从可用工具中选择一个最合适的工具，并生成工具参数。
 
 用户任务：
 {state["Task"]}
@@ -72,15 +74,65 @@ def select_tool(state: AgentState) -> dict:
 可用工具：
 {tools_text}
 
-请判断是否需要调用工具，并选择最合适的工具。
+工具选择规则：
+1. 如果用户要列出目录、查看目录下有哪些文件、查看项目结构，选择 list_files。
+2. 如果用户要读取、查看、总结、分析某个文件的内容，必须选择 read_file。
+3. 如果用户要创建、写入、修改、覆盖某个文件，选择 write_file。
+4. 如果用户的问题不需要访问文件、不需要执行真实操作，选择 mock_tool。
+5. 不要选择不存在于可用工具列表中的工具。
+6. 工具参数必须严格匹配该工具的参数说明。
 
-只返回 JSON，不要解释：
+路径参数规则：
+1. 如果用户明确给出文件名或目录名，必须提取为 path。
+2. 例如 requirements.txt、README.md、app、docs 都应该作为 path。
+3. 如果用户要列出当前目录，path 使用 "."。
+4. 如果无法确定路径，path 使用 "."。
+
+示例 1：
+用户任务：读取 requirements.txt
+返回：
+{{
+  "need_tool": true,
+  "selected_tool": "read_file",
+  "tool_input": {{"path": "requirements.txt"}}
+}}
+
+示例 2：
+用户任务：帮我列出 app 目录下的文件
+返回：
+{{
+  "need_tool": true,
+  "selected_tool": "list_files",
+  "tool_input": {{"path": "app"}}
+}}
+
+示例 3：
+用户任务：帮我写入 demo.txt，内容是 hello
+返回：
+{{
+  "need_tool": true,
+  "selected_tool": "write_file",
+  "tool_input": {{"path": "demo.txt", "content": "hello"}}
+}}
+
+示例 4：
+用户任务：给我一个学习 LangGraph 的计划
+返回：
+{{
+  "need_tool": false,
+  "selected_tool": "mock_tool",
+  "tool_input": {{}}
+}}
+
+请只返回 JSON，不要解释，不要 Markdown，不要代码块。
+JSON 格式如下：
 {{
   "need_tool": true,
   "selected_tool": "工具名",
   "tool_input": {{}}
 }}
 """
+
 
     llm = ChatOpenAI(
         model=KIMI_MODEL,
