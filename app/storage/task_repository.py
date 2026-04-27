@@ -4,13 +4,18 @@ from app.storage.database import SessionLocal, Task, StepLog
 
 from sqlalchemy import select
 
-def create_task(task_text: str, status: str = "created") -> int:
+def create_task(
+    task_text: str,
+    thread_id: str,
+    status: str = "created",
+) -> int:
     db = SessionLocal()
 
     try:
         task = Task(
             task=task_text,
             status=status,
+            thread_id=thread_id,
         )
 
         db.add(task)
@@ -21,6 +26,7 @@ def create_task(task_text: str, status: str = "created") -> int:
 
     finally:
         db.close()
+
 
 
 def update_task(task_id: int, state: dict) -> None:

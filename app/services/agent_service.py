@@ -3,13 +3,14 @@ from langgraph.types import Command
 from app.agent.graph import app
 from app.storage.database import init_db
 from app.storage import task_repository as task_repo
-
+from uuid import uuid4
 
 def run_task(task_text: str) -> dict:
     init_db()
 
-    task_id = task_repo.create_task(task_text)
-    thread_id = f"task-{task_id}"
+    thread_id = str(uuid4())
+    task_id = task_repo.create_task(task_text, thread_id)
+
 
     result = app.invoke(
         {

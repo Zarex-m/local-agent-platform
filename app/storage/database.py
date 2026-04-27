@@ -18,6 +18,7 @@ class Task(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task: Mapped[str] = mapped_column(Text, nullable=False)
+    thread_id:Mapped[str]=mapped_column(String(255),nullable=False,index=True,unique=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_tool: Mapped[str | None] = mapped_column(String(255), nullable=True)
