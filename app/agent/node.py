@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 from app.tools.registry import TOOL_REGISTRY, get_tools_text
 from langgraph.types import interrupt
+
 load_dotenv()
 
 # 导入env
@@ -39,18 +40,28 @@ def plan_task(state: AgentState) -> dict:
 4. 每一步只保留一句话
 """
 
-    plan = llm.invoke(prompt)
+    try:
+        plan = llm.invoke(prompt)
+    except Exception as e:
+        return {
+            "plan": ["模型调用失败，使用默认计划"],
+            "status": "planned",
+            "error": f"plan_task 模型调用失败：{str(e)}",
+            "step_logs": [
+                {
+                    "node": "plan_task",
+                    "message": f"模型调用失败，使用默认计划：{str(e)}",
+                    "status": "planned",
+                }
+            ],
+        }
 
     return {
         "plan": plan.content.split("\n"),
         "status": "planned",
-        "step_logs":[
-            {
-                "node":"plan_task",
-                "message":"生成任务计划",
-                "status":"planned"
-            }
-        ]
+        "step_logs": [
+            {"node": "plan_task", "message": "生成任务计划", "status": "planned"}
+        ],
     }
 
 
@@ -58,7 +69,7 @@ def select_tool(state: AgentState) -> dict:
     """
     根据计划，选择合适的工具
     """
-    tools_text=get_tools_text()
+    tools_text = get_tools_text()
 
     prompt = f"""
 你是一个严格的 Agent 工具选择器。
@@ -133,7 +144,6 @@ JSON 格式如下：
 }}
 """
 
-
     llm = ChatOpenAI(
         model=KIMI_MODEL,
         temperature=1,
@@ -141,37 +151,67 @@ JSON 格式如下：
         base_url=KIMI_BASE_URL,
     )
 
-    response = llm.invoke(prompt)
+    try:
+        response = llm.invoke(prompt)
+    except Exception as e:
+        return {
+            "selected_tool": "mock_tool",
+            "tool_input": {},
+            "status": "tool_selected",
+            "error": f"select_tool 模型调用失败：{str(e)}",
+            "step_logs": [
+                {
+                    "node": "select_tool",
+                    "message": f"模型调用失败，降级选择 mock_tool：{str(e)}",
+                    "status": "tool_selected",
+                }
+            ],
+        }
     content = response.content.strip()
     content = content.removeprefix("```json").removesuffix("```").strip()
-    result = json.loads(content)
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        return {
+            "selected_tool": "mock_tool",
+            "tool_input": {},
+            "status": "tool_selected",
+            "step_logs": [
+                {
+                    "node": "select_tool",
+                    "message": "解析工具选择结果失败，默认选择 mock_tool",
+                    "status": "tool_selected",
+                }
+            ],
+        }
 
     if not result.get("need_tool", True):
         return {
             "selected_tool": "mock_tool",
             "tool_input": {},
             "status": "tool_selected",
-            "step_logs":[
+            "step_logs": [
                 {
-                    "node":"select_tool",
-                    "message":"不需要真实工具，选择 mock_tool",
-                    "status":"tool_selected"
+                    "node": "select_tool",
+                    "message": "不需要真实工具，选择 mock_tool",
+                    "status": "tool_selected",
                 }
-            ]
+            ],
         }
 
     return {
         "selected_tool": result.get("selected_tool", "mock_tool"),
         "tool_input": result.get("tool_input", {}),
         "status": "tool_selected",
-        "step_logs":[
+        "step_logs": [
             {
-                "node":"select_tool",
-                "message":f"选择工具 {result.get('selected_tool', 'mock_tool')}",
-                "status":"tool_selected"
+                "node": "select_tool",
+                "message": f"选择工具 {result.get('selected_tool', 'mock_tool')}",
+                "status": "tool_selected",
             }
-        ]
+        ],
     }
+
 
 def check_approval(state: AgentState) -> dict:
     """
@@ -182,64 +222,66 @@ def check_approval(state: AgentState) -> dict:
     risk_level = tool_info.get("risk_level", "low")
 
     if risk_level == "high":
-        decision=interrupt({
-            "tool_name": tool_name,
-            "tool_input": state.get("tool_input", {}),
-            "risk_level": risk_level,
-            "reason": f"工具 {tool_name} 风险等级为 high，需要用户审批",
-        }
+        decision = interrupt(
+            {
+                "tool_name": tool_name,
+                "tool_input": state.get("tool_input", {}),
+                "risk_level": risk_level,
+                "reason": f"工具 {tool_name} 风险等级为 high，需要用户审批",
+            }
         )
         if decision.get("approved"):
             return {
-            "approved": True,
-            "approval_required": False,
-            "approval_reason": None,
-            "status": "approved",
-            "step_logs":[
-                {
-                    "node":"check_approval",
-                    "message":f"用户批准执行高风险工具 {tool_name}",
-                    "status":"approved"
-                }
-            ]
-        }
-        return {
-                "approved": False,
-                "approval_required": True,
-                "approval_reason":"用户拒绝了高风险工具的使用",
-                "status": "rejected",
-                "step_logs":[
+                "approved": True,
+                "approval_required": False,
+                "approval_reason": None,
+                "status": "approved",
+                "step_logs": [
                     {
-                        "node":"check_approval",
-                        "message":f"用户拒绝执行高风险工具 {tool_name}",
-                        "status":"rejected"
+                        "node": "check_approval",
+                        "message": f"用户批准执行高风险工具 {tool_name}",
+                        "status": "approved",
                     }
-                ]
+                ],
             }
+        return {
+            "approved": False,
+            "approval_required": True,
+            "approval_reason": "用户拒绝了高风险工具的使用",
+            "status": "rejected",
+            "step_logs": [
+                {
+                    "node": "check_approval",
+                    "message": f"用户拒绝执行高风险工具 {tool_name}",
+                    "status": "rejected",
+                }
+            ],
+        }
 
     return {
         "approved": True,
         "approval_required": False,
         "approval_reason": None,
         "status": "approved",
-        "step_logs":[
+        "step_logs": [
             {
-                "node":"check_approval",
-                "message":f"工具 {tool_name} 风险等级为 {risk_level}，无需审批",
-                "status":"approved"
+                "node": "check_approval",
+                "message": f"工具 {tool_name} 风险等级为 {risk_level}，无需审批",
+                "status": "approved",
             }
-        ]
+        ],
     }
+
 
 def execute_tool(state: AgentState) -> dict:
     """
     执行选中的工具，获取结果
     """
-    tool_name=state.get("selected_tool","mock_tool")
-    tool_input=state.get("tool_input",{})
-    
-    tool_info=TOOL_REGISTRY.get(tool_name)
-    
+    tool_name = state.get("selected_tool", "mock_tool")
+    tool_input = state.get("tool_input", {})
+
+    tool_info = TOOL_REGISTRY.get(tool_name)
+
     if tool_info is None:
         return {
             "tool_output": {
@@ -248,21 +290,29 @@ def execute_tool(state: AgentState) -> dict:
                 "error": f"未知工具：{tool_name}",
             },
             "status": "failed",
+            "step_logs": [
+                {
+                    "node": "execute_tool",
+                    "message": f"未知工具：{tool_name}",
+                    "status": "failed",
+                }
+            ],
         }
     handler = tool_info["handler"]
-    tool_output = handler(tool_input)          
-   
+    tool_output = handler(tool_input)
+
     return {
         "tool_output": tool_output,
         "status": "tool_executed" if tool_output.get("success") else "failed",
-        "step_logs":[
+        "step_logs": [
             {
-                "node":"execute_tool",
-                "message":f"执行工具 {tool_name}，结果：{tool_output}",
-                "status":"tool_executed" if tool_output.get("success") else "failed"
+                "node": "execute_tool",
+                "message": f"执行工具 {tool_name}，结果：{tool_output}",
+                "status": "tool_executed" if tool_output.get("success") else "failed",
             }
-        ]
+        ],
     }
+
 
 def finalize_task(state: AgentState) -> dict:
     """
@@ -298,25 +348,41 @@ def finalize_task(state: AgentState) -> dict:
         base_url=KIMI_BASE_URL,
     )
 
-    final_response = llm.invoke(prompt).content.strip()
+    try:
+        final_response = llm.invoke(prompt).content.strip()
+    except Exception as e:
+        return {
+            "final_response": f"任务已执行，但生成最终回复时失败：{str(e)}",
+            "status": "completed" if tool_output.get("success") else "failed",
+            "error": f"finalize_task 模型调用失败：{str(e)}",
+            "step_logs": [
+                {
+                    "node": "finalize_task",
+                    "message": f"模型调用失败，使用兜底回复：{str(e)}",
+                    "status": "completed" if tool_output.get("success") else "failed",
+                }
+            ],
+        }
+
     if state.get("status") == "pending_approval":
         return {
-        "final_response": state.get("approval_reason", "该操作需要用户审批"),
-        "status": "pending_approval",
-    }
+            "final_response": state.get("approval_reason", "该操作需要用户审批"),
+            "status": "pending_approval",
+        }
     return {
         "final_response": final_response,
         "status": "completed" if tool_output.get("success") else "failed",
-        "step_logs":[
+        "step_logs": [
             {
-                "node":"finalize_task",
-                "message":f"生成最终响应，状态：{'completed' if tool_output.get('success') else 'failed'}",
-                "status":"completed" if tool_output.get("success") else "failed"
+                "node": "finalize_task",
+                "message": f"生成最终响应，状态：{'completed' if tool_output.get('success') else 'failed'}",
+                "status": "completed" if tool_output.get("success") else "failed",
             }
-        ]
+        ],
     }
 
-#路由函数
+
+# 路由函数
 def route_after_approval(state: AgentState) -> str:
     if state.get("approved"):
         return "execute_tool"
