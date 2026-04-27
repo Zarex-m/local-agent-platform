@@ -12,3 +12,5 @@ __pycache__/
 
 # Logs
 *.log
+service_demo.txt
+api_demo.txt

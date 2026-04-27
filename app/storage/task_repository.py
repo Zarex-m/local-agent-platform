@@ -107,3 +107,10 @@ def get_step_logs(task_id: int) -> list[StepLog]:
     finally:
         db.close()
 
+def list_tasks(limit:int=20)->list[Task]:
+    db=SessionLocal()
+    try:
+        stmt=select(Task).order_by(Task.id.desc()).limit(limit)
+        return db.execute(stmt).scalars().all()
+    finally:
+        db.close()
