@@ -14,7 +14,11 @@ def load_mcp_tools_to_registry() -> dict:
     registry_items = {}
 
     for server_name in MCP_SERVERS.keys():
-        tools = list_mcp_tools_sync(server_name)
+        try:
+            tools = list_mcp_tools_sync(server_name)
+        except Exception as e:
+            print(f"加载 MCP Server 失败：{server_name}，原因：{e}")
+            continue
 
         for tool in tools:
             registry_name = f"mcp.{server_name}.{tool['name']}"
