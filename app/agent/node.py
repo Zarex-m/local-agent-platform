@@ -6,12 +6,29 @@ from app.storage import task_repository as task_repo
 from app.tools.registry import TOOL_REGISTRY, get_tools_text
 from langgraph.types import interrupt
 
+LOG_STARTED = "started"
+LOG_SUCCESS = "success"
+LOG_WAITING_APPROVAL = "waiting_approval"
+LOG_FAILED = "failed"
+LOG_SKIPPED = "skipped"
+
+
+def append_runtime_log(state: AgentState, node: str, status: str, message: str) -> None:
+    task_id = state.get("task_id")
+    if not task_id:
+        return
+
+    try:
+        task_repo.append_step_log(task_id, node, status, message)
+    except Exception:
+        pass
 
 # plan
 def plan_task(state: AgentState) -> dict:
     """
     根据当前任务，制定计划
     """
+    append_runtime_log(state, "plan_task", LOG_STARTED, "正在生成任务计划")
 
     prompt = f"""
 你是 Agent 的计划节点。
@@ -50,7 +67,7 @@ def plan_task(state: AgentState) -> dict:
                 {
                     "node": "plan_task",
                     "message": f"模型调用失败，使用默认计划：{str(e)}",
-                    "status": "planned",
+                    "status": LOG_SUCCESS,
                 }
             ],
         }
@@ -70,7 +87,7 @@ def plan_task(state: AgentState) -> dict:
         "current_step": plan_steps[0] if plan_steps else {},
         "status": "planned",
         "step_logs": [
-            {"node": "plan_task", "message": "生成结构化任务计划", "status": "planned"}
+            {"node": "plan_task", "message": "生成结构化任务计划", "status": LOG_SUCCESS}
         ],
     }
 
@@ -79,6 +96,7 @@ def select_tool(state: AgentState) -> dict:
     """
     根据计划，选择合适的工具
     """
+    append_runtime_log(state, "select_tool", LOG_STARTED, "正在选择工具")
     tools_text = get_tools_text()
 
     prompt = f"""
@@ -241,7 +259,7 @@ JSON 格式如下：
                 {
                     "node": "select_tool",
                     "message": f"模型调用失败，降级选择 mock_tool：{result['_error']}",
-                    "status": "tool_selected",
+                    "status": LOG_SUCCESS,
                 }
             ],
         }
@@ -255,7 +273,7 @@ JSON 格式如下：
                 {
                     "node": "select_tool",
                     "message": "不需要真实工具，选择 mock_tool",
-                    "status": "tool_selected",
+                    "status": LOG_SUCCESS,
                 }
             ],
         }
@@ -268,7 +286,7 @@ JSON 格式如下：
             {
                 "node": "select_tool",
                 "message": f"选择工具 {result.get('selected_tool', 'mock_tool')}",
-                "status": "tool_selected",
+                "status": LOG_SUCCESS,
             }
         ],
     }
@@ -278,11 +296,18 @@ def check_approval(state: AgentState) -> dict:
     """
     如果工具风险较高，暂停等待用户审批
     """
+    append_runtime_log(state, "check_approval", LOG_STARTED, "正在检查工具风险")
     tool_name = state.get("selected_tool", "mock_tool")
     tool_info = TOOL_REGISTRY.get(tool_name, {})
     risk_level = tool_info.get("risk_level", "low")
 
     if risk_level == "high":
+        append_runtime_log(
+            state,
+            "check_approval",
+            LOG_WAITING_APPROVAL,
+            f"工具 {tool_name} 风险等级为 high，等待用户审批",
+        )
         decision = interrupt(
             {
                 "tool_name": tool_name,
@@ -301,7 +326,7 @@ def check_approval(state: AgentState) -> dict:
                     {
                         "node": "check_approval",
                         "message": f"用户批准执行高风险工具 {tool_name}",
-                        "status": "approved",
+                        "status": LOG_SUCCESS,
                     }
                 ],
             }
@@ -314,7 +339,7 @@ def check_approval(state: AgentState) -> dict:
                 {
                     "node": "check_approval",
                     "message": f"用户拒绝执行高风险工具 {tool_name}",
-                    "status": "rejected",
+                    "status": LOG_FAILED,
                 }
             ],
         }
@@ -328,7 +353,7 @@ def check_approval(state: AgentState) -> dict:
             {
                 "node": "check_approval",
                 "message": f"工具 {tool_name} 风险等级为 {risk_level}，无需审批",
-                "status": "approved",
+                "status": LOG_SKIPPED,
             }
         ],
     }
@@ -340,6 +365,7 @@ def execute_tool(state: AgentState) -> dict:
     """
     tool_name = state.get("selected_tool", "mock_tool")
     tool_input = state.get("tool_input", {})
+    append_runtime_log(state, "execute_tool", LOG_STARTED, f"正在执行工具 {tool_name}")
 
     tool_info = TOOL_REGISTRY.get(tool_name)
 
@@ -355,7 +381,7 @@ def execute_tool(state: AgentState) -> dict:
                 {
                     "node": "execute_tool",
                     "message": f"未知工具：{tool_name}",
-                    "status": "failed",
+                    "status": LOG_FAILED,
                 }
             ],
         }
@@ -382,7 +408,7 @@ def execute_tool(state: AgentState) -> dict:
             {
                 "node": "execute_tool",
                 "message": f"执行工具 {tool_name}，结果：{tool_output}",
-                "status": "tool_executed" if tool_output.get("success") else "failed",
+                "status": LOG_SUCCESS if tool_output.get("success") else LOG_FAILED,
             }
         ],
     }
@@ -391,6 +417,7 @@ def update_plan_step(state: AgentState) -> dict:
     """
     根据刚刚的工具执行结果，更新当前计划步骤状态
     """
+    append_runtime_log(state, "update_plan_step", LOG_STARTED, "正在更新计划进度")
     plan_steps = state.get("plan_steps", [])
     current_step = state.get("current_step", {})
     tool_output = state.get("tool_output", {})
@@ -403,7 +430,7 @@ def update_plan_step(state: AgentState) -> dict:
                 {
                     "node": "update_plan_step",
                     "message": "没有可更新的计划步骤",
-                    "status": "planned",
+                    "status": LOG_SKIPPED,
                 }
             ],
         }
@@ -436,7 +463,7 @@ def update_plan_step(state: AgentState) -> dict:
             {
                 "node": "update_plan_step",
                 "message": f"更新计划步骤 {current_index}，下一步：{next_step or '无'}",
-                "status": "plan_updated",
+                "status": LOG_SUCCESS,
             }
         ],
     }
@@ -446,6 +473,7 @@ def decide_next_step(state: AgentState) -> dict:
     """
     判断任务是否需要继续调用工具
     """
+    append_runtime_log(state, "decide_next_step", LOG_STARTED, "正在判断是否继续执行")
     iterations = state.get("iterations", 0)
     max_iterations = state.get("max_iterations", 3)
 
@@ -457,7 +485,7 @@ def decide_next_step(state: AgentState) -> dict:
                 {
                     "node": "decide_next_step",
                     "message": f"已达到最大执行轮次 {max_iterations}，结束任务",
-                    "status": "decided",
+                    "status": LOG_SUCCESS,
                 }
             ],
         }
@@ -471,7 +499,7 @@ def decide_next_step(state: AgentState) -> dict:
             "step_logs": [{
                 "node": "decide_next_step",
                 "message": f"没有当前步骤，结束任务",
-                "status": "decided",
+                "status": LOG_SUCCESS,
             }]
         }
     
@@ -483,7 +511,7 @@ def decide_next_step(state: AgentState) -> dict:
                 {
                     "node": "decide_next_step",
                     "message": f"工具执行失败，结束任务",
-                    "status": "decided",
+                    "status": LOG_SUCCESS,
                 }
             ],
         }
@@ -498,23 +526,23 @@ def decide_next_step(state: AgentState) -> dict:
                 {
                     "node": "decide_next_step",
                     "message": f"当前步骤适合直接生成最终回答：{current_step}",
-                    "status": "decided",
+                    "status": LOG_SUCCESS,
                 }
             ],
         }
 
     if current_step and state.get("tool_output", {}).get("success"):
         return {
-        "next_action": "continue",
-        "status": "decided",
-        "step_logs": [
-            {
-                "node": "decide_next_step",
-                "message": f"还有待执行步骤：{current_step}",
-                "status": "decided",
-            }
-        ],
-    }
+            "next_action": "continue",
+            "status": "decided",
+            "step_logs": [
+                {
+                    "node": "decide_next_step",
+                    "message": f"还有待执行步骤：{current_step}",
+                    "status": LOG_SUCCESS,
+                }
+            ],
+        }
 
     prompt = f"""
 你是 Agent 的任务进度判断节点。
@@ -566,7 +594,7 @@ def decide_next_step(state: AgentState) -> dict:
                 {
                     "node": "decide_next_step",
                     "message": f"判断失败，默认结束：{result['_error']}",
-                    "status": "decided",
+                    "status": LOG_FAILED,
                 }
             ],
         }
@@ -580,7 +608,7 @@ def decide_next_step(state: AgentState) -> dict:
             {
                 "node": "decide_next_step",
                 "message": f"判断下一步动作：{next_action}，原因：{result.get('reason','无')}",
-                "status": "decided",
+                "status": LOG_SUCCESS,
             }
         ],
     }
@@ -590,12 +618,20 @@ def finalize_task(state: AgentState) -> dict:
     """
     根据工具结果，生成最终响应
     """
+    append_runtime_log(state, "finalize_task", LOG_STARTED, "正在生成最终回复")
     tool_output = state.get("tool_output", {})
 
     if state.get("status") == "pending_approval":
         return {
             "final_response": state.get("approval_reason", "该操作需要用户审批"),
             "status": "pending_approval",
+            "step_logs": [
+                {
+                    "node": "finalize_task",
+                    "message": "任务正在等待审批，暂不生成最终回复",
+                    "status": LOG_WAITING_APPROVAL,
+                }
+            ],
         }
 
     final_status = "completed" if tool_output.get("success") else "failed"
@@ -689,7 +725,7 @@ def finalize_task(state: AgentState) -> dict:
                 {
                     "node": "finalize_task",
                     "message": f"模型调用失败，使用兜底回复：{str(e)}",
-                    "status": final_status,
+                    "status": LOG_FAILED,
                 }
             ],
         }
@@ -701,7 +737,7 @@ def finalize_task(state: AgentState) -> dict:
             {
                 "node": "finalize_task",
                 "message": f"生成最终响应，状态：{final_status}",
-                "status": final_status,
+                "status": LOG_SUCCESS if final_status == "completed" else LOG_FAILED,
             }
         ],
     }

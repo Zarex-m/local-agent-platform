@@ -181,3 +181,22 @@ def parse_json_field(value):
         return json.loads(value)
     except json.JSONDecodeError:
         return value
+
+def append_step_log(task_id: int, node: str, status: str, message: str) -> None:
+    db = SessionLocal()
+    try:
+        task = db.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
+        if task is None:
+            raise ValueError(f"Task with id {task_id} not found")
+
+        db.add(
+            StepLog(
+                task_id=task_id,
+                node=node,
+                status=status,
+                message=message,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()

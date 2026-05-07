@@ -102,6 +102,59 @@ function isTerminalStatus(status?: string | null) {
   return status === "completed" || status === "failed" || status === "rejected";
 }
 
+type TimelineState = "pending" | "active" | "success" | "warning" | "failed";
+
+const timelineConfigs = [
+  {
+    id: "plan",
+    label: "规划",
+    nodes: ["plan_task"],
+  },
+  {
+    id: "select",
+    label: "选工具",
+    nodes: ["select_tool"],
+  },
+  {
+    id: "approval",
+    label: "审批",
+    nodes: ["check_approval"],
+  },
+  {
+    id: "execute",
+    label: "执行",
+    nodes: ["execute_tool"],
+  },
+  {
+    id: "update",
+    label: "更新计划",
+    nodes: ["update_plan_step", "decide_next_step"],
+  },
+  {
+    id: "finalize",
+    label: "生成回复",
+    nodes: ["finalize_task"],
+  },
+];
+
+function isFailureStatus(status?: string | null) {
+  if (!status) return false;
+  return /failed|error|rejected|失败|拒绝/.test(status);
+}
+
+function isWaitingStatus(status?: string | null) {
+  if (!status) return false;
+  return /pending|approval|waiting|待审批|等待/.test(status);
+}
+
+function getTimelineStateLabel(state: TimelineState) {
+  if (state === "active") return "进行中";
+  if (state === "success") return "完成";
+  if (state === "warning") return "待处理";
+  if (state === "failed") return "失败";
+  return "等待";
+}
+
 export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -504,6 +557,87 @@ export default function App() {
     [toolCalls],
   );
 
+  const timelineSteps = useMemo(() => {
+    const latestLog = orderedLogs[orderedLogs.length - 1];
+
+    return timelineConfigs.map((config) => {
+      const stepLogs = orderedLogs.filter((log) => config.nodes.includes(log.node));
+      const stepLog = stepLogs[stepLogs.length - 1] ?? null;
+      const isLatestActiveLog = Boolean(
+        stepLog &&
+          latestLog &&
+          stepLog.id === latestLog.id &&
+          selectedTask &&
+          !isTerminalStatus(selectedTask.status),
+      );
+      let state: TimelineState = "pending";
+
+      if (stepLog) {
+        if (isFailureStatus(stepLog.status) || selectedTask?.status === "failed") {
+          state = "failed";
+        } else if (isWaitingStatus(stepLog.status) || selectedTask?.status === "pending_approval") {
+          state = "warning";
+        } else if (isLatestActiveLog) {
+          state = "active";
+        } else {
+          state = "success";
+        }
+      }
+
+      if (config.id === "finalize" && selectedTask?.final_response) {
+        state = selectedTask.status === "completed" ? "success" : "active";
+      }
+
+      if (config.id === "approval" && selectedTask?.status === "pending_approval") {
+        state = "warning";
+      }
+
+      return {
+        ...config,
+        log: stepLog,
+        state,
+      };
+    });
+  }, [orderedLogs, selectedTask?.final_response, selectedTask?.status]);
+
+  const currentTimelineStep = useMemo(() => {
+    const activeStep = timelineSteps.find(
+      (step) => step.state === "active" || step.state === "warning",
+    );
+    if (activeStep) return activeStep;
+
+    const completedSteps = timelineSteps.filter((step) => step.state === "success");
+    return completedSteps[completedSteps.length - 1] ?? timelineSteps[0];
+  }, [timelineSteps]);
+
+  const latestToolCall = orderedToolCalls[orderedToolCalls.length - 1] ?? null;
+  const currentProgressTitle =
+    selectedTask?.status === "completed"
+      ? "任务已完成"
+      : selectedTask?.status === "failed"
+        ? "任务执行失败"
+        : selectedTask?.status === "rejected"
+          ? "任务已拒绝"
+          : selectedTask?.status === "pending_approval"
+            ? "等待审批"
+            : currentTimelineStep
+              ? `正在${currentTimelineStep.label}`
+              : "Agent 正在运行";
+  const currentProgressDetail =
+    selectedTask?.status === "pending_approval"
+      ? selectedTask.approval_reason ?? "有高风险操作需要确认。"
+      : latestToolCall && currentTimelineStep?.id === "execute"
+        ? `正在调用 ${latestToolCall.tool_name}`
+        : currentTimelineStep?.log?.message ?? "等待执行状态更新。";
+
+  function renderTimelineStatusIcon(state: TimelineState) {
+    if (state === "active") return <Loader2 className="spin" size={15} />;
+    if (state === "success") return <Check size={15} />;
+    if (state === "warning") return <ShieldAlert size={15} />;
+    if (state === "failed") return <X size={15} />;
+    return <Clock3 size={15} />;
+  }
+
   function renderComposer(className = "chatComposer") {
     return (
       <form className={className} onSubmit={handleSubmit}>
@@ -753,6 +887,36 @@ export default function App() {
               )}
 
               {selectedTask && (
+                <article className="messageRow assistant progressRow">
+                  <div className="avatar traceAvatar">
+                    <Clock3 size={17} />
+                  </div>
+                  <div className="agentProgressPanel">
+                    <div className="agentProgressHeader">
+                      <div>
+                        <strong>{currentProgressTitle}</strong>
+                        <span>{compactMessage(currentProgressDetail)}</span>
+                      </div>
+                      <b className={`timelineState ${currentTimelineStep?.state ?? "pending"}`}>
+                        {getTimelineStateLabel(currentTimelineStep?.state ?? "pending")}
+                      </b>
+                    </div>
+
+                    <div className="agentTimeline" aria-label="Agent 执行进度">
+                      {timelineSteps.map((step) => (
+                        <div className={`timelineStep ${step.state}`} key={step.id}>
+                          <span className="timelineIcon">
+                            {renderTimelineStatusIcon(step.state)}
+                          </span>
+                          <span>{step.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              )}
+
+              {selectedTask && (
                 <article className="traceToggleRow">
                   <button
                     className="traceToggleButton"
@@ -760,7 +924,7 @@ export default function App() {
                     type="button"
                   >
                     <Clock3 size={16} />
-                    {showTrace ? "隐藏执行过程" : "查看执行过程"}
+                    {showTrace ? "隐藏详细日志" : "查看详细日志"}
                     <span>
                       {orderedLogs.length} 条日志 · {orderedToolCalls.length} 次工具调用
                     </span>

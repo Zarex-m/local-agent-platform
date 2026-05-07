@@ -505,6 +505,156 @@ h2 {
   font-weight: 600;
 }
 
+.progressRow {
+  margin-top: -4px;
+}
+
+.agentProgressPanel {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e6e7eb;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(30, 34, 42, 0.035);
+}
+
+.agentProgressHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.agentProgressHeader div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agentProgressHeader strong {
+  color: #202123;
+  font-size: 14px;
+}
+
+.agentProgressHeader span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #69707a;
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.timelineState {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.timelineState.pending {
+  color: #6b7280;
+  background: #f1f2f4;
+}
+
+.timelineState.active {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+.timelineState.success {
+  color: #0c6b4f;
+  background: #dff7ee;
+}
+
+.timelineState.warning {
+  color: #7a4b00;
+  background: #fff1d6;
+}
+
+.timelineState.failed {
+  color: #8b2424;
+  background: #ffe8e8;
+}
+
+.agentTimeline {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.timelineStep {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 5px;
+  border: 1px solid #ececf1;
+  border-radius: 13px;
+  color: #7a7f87;
+  background: #fbfbfc;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.timelineIcon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: #7a7f87;
+  background: #eef0f3;
+}
+
+.timelineStep.active {
+  color: #075985;
+  border-color: #bae6fd;
+  background: #f0f9ff;
+}
+
+.timelineStep.active .timelineIcon {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+.timelineStep.success {
+  color: #0c6b4f;
+  border-color: #c8efdf;
+  background: #f1fbf7;
+}
+
+.timelineStep.success .timelineIcon {
+  color: #0c6b4f;
+  background: #dff7ee;
+}
+
+.timelineStep.warning {
+  color: #7a4b00;
+  border-color: #f5d48a;
+  background: #fff8e8;
+}
+
+.timelineStep.warning .timelineIcon {
+  color: #7a4b00;
+  background: #fff1d6;
+}
+
+.timelineStep.failed {
+  color: #8b2424;
+  border-color: #f7c7c7;
+  background: #fff3f3;
+}
+
+.timelineStep.failed .timelineIcon {
+  color: #8b2424;
+  background: #ffe8e8;
+}
+
 .tracePanelRow {
   margin-top: 0;
 }
@@ -954,6 +1104,10 @@ pre {
   .messageStack {
     padding: 18px 14px 24px;
   }
+
+  .agentTimeline {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -992,5 +1146,9 @@ pre {
 
   .startScreen h2 {
     margin-bottom: 42px;
+  }
+
+  .agentTimeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
