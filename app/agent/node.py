@@ -1,17 +1,7 @@
 from app.agent.state import AgentState
-from langchain_openai import ChatOpenAI
-import json
-import os
-from dotenv import load_dotenv
+from app.agent.llm import invoke_llm, invoke_llm_json
 from app.tools.registry import TOOL_REGISTRY, get_tools_text
 from langgraph.types import interrupt
-
-load_dotenv()
-
-# 导入env
-KIMI_API_KEY = os.getenv("KIMI_API_KEY")
-KIMI_BASE_URL = os.getenv("KIMI_BASE_URL")
-KIMI_MODEL = os.getenv("KIMI_MODEL")
 
 
 # plan
@@ -20,12 +10,6 @@ def plan_task(state: AgentState) -> dict:
     根据当前任务，制定计划
     """
 
-    llm = ChatOpenAI(
-        model=KIMI_MODEL,
-        temperature=1,
-        openai_api_key=KIMI_API_KEY,
-        base_url=KIMI_BASE_URL,
-    )
     prompt = f"""
 你是 Agent 的计划节点。
 
@@ -41,10 +25,19 @@ def plan_task(state: AgentState) -> dict:
 """
 
     try:
-        plan = llm.invoke(prompt)
+        plan_content = invoke_llm(prompt)
     except Exception as e:
+        default_steps = [
+            {
+                "index": 1,
+                "description": "使用可用工具完成用户任务",
+                "status": "pending",
+            }
+        ]
         return {
-            "plan": ["模型调用失败，使用默认计划"],
+            "plan": ["模型调用失败,使用可用工具完成用户任务"],
+            "plan_steps": default_steps,
+            "current_step": default_steps[0],
             "status": "planned",
             "error": f"plan_task 模型调用失败：{str(e)}",
             "step_logs": [
@@ -55,12 +48,23 @@ def plan_task(state: AgentState) -> dict:
                 }
             ],
         }
+    raw_steps = [line.strip() for line in plan_content.split("\n") if line.strip()]
 
+    plan_steps = [
+        {
+            "index": index + 1,
+            "description": step,
+            "status": "pending",
+        }
+        for index, step in enumerate(raw_steps)
+    ]
     return {
-        "plan": plan.content.split("\n"),
+        "plan": raw_steps,
+        "plan_steps": plan_steps,
+        "current_step": plan_steps[0] if plan_steps else {},
         "status": "planned",
         "step_logs": [
-            {"node": "plan_task", "message": "生成任务计划", "status": "planned"}
+            {"node": "plan_task", "message": "生成结构化任务计划", "status": "planned"}
         ],
     }
 
@@ -82,6 +86,18 @@ def select_tool(state: AgentState) -> dict:
 执行计划：
 {state.get("plan", [])}
 
+结构化计划：
+{state.get("plan_steps", [])}
+
+当前应执行步骤：
+{state.get("current_step", {})}
+
+已执行工具历史：
+{state.get("tool_history", [])}
+
+当前执行轮次：
+{state.get("iterations", 0)}
+
 可用工具：
 {tools_text}
 
@@ -95,6 +111,13 @@ def select_tool(state: AgentState) -> dict:
 7.如果用户要执行 shell 命令、运行测试、运行脚本、安装依赖、查看命令输出，选择 run_shell。
 8.如果用户要访问 URL、请求 API、测试 HTTP 接口、发送 GET/POST/PUT/DELETE 请求，选择 http_request。
 9.如果任务适合某个 MCP 工具，并且该工具出现在可用工具列表中，可以选择名称以 mcp. 开头的工具。
+10. 如果已执行工具历史已经满足用户任务，不要重复选择相同工具。
+11. 如果任务需要多步完成，请根据历史结果选择下一步工具。
+12. 如果用户要求先做 A 再做 B，应按顺序选择尚未执行的下一步工具。
+13. 优先根据 current_step 选择工具，而不是重新理解整个任务。
+14. 如果 current_step 是读取文件，选择 read_file。
+15. 如果 current_step 是列出目录，选择 list_files。
+16. 如果 current_step 是总结、分析、回答，并且已有工具历史足够支撑，可以选择 mock_tool 并设置 need_tool 为 false。
 
 路径参数规则：
 1. 如果用户明确给出文件名或目录名，必须提取为 path。
@@ -189,42 +212,25 @@ JSON 格式如下：
 }}
 """
 
-    llm = ChatOpenAI(
-        model=KIMI_MODEL,
-        temperature=1,
-        openai_api_key=KIMI_API_KEY,
-        base_url=KIMI_BASE_URL,
+    result = invoke_llm_json(
+        prompt,
+        default={
+            "need_tool": True,
+            "selected_tool": "mock_tool",
+            "tool_input": {},
+        },
     )
 
-    try:
-        response = llm.invoke(prompt)
-    except Exception as e:
+    if result.get("_error"):
         return {
             "selected_tool": "mock_tool",
             "tool_input": {},
             "status": "tool_selected",
-            "error": f"select_tool 模型调用失败：{str(e)}",
+            "error": f"select_tool 模型调用失败：{result['_error']}",
             "step_logs": [
                 {
                     "node": "select_tool",
-                    "message": f"模型调用失败，降级选择 mock_tool：{str(e)}",
-                    "status": "tool_selected",
-                }
-            ],
-        }
-    content = response.content.strip()
-    content = content.removeprefix("```json").removesuffix("```").strip()
-    try:
-        result = json.loads(content)
-    except json.JSONDecodeError:
-        return {
-            "selected_tool": "mock_tool",
-            "tool_input": {},
-            "status": "tool_selected",
-            "step_logs": [
-                {
-                    "node": "select_tool",
-                    "message": "解析工具选择结果失败，默认选择 mock_tool",
+                    "message": f"模型调用失败，降级选择 mock_tool：{result['_error']}",
                     "status": "tool_selected",
                 }
             ],
@@ -346,14 +352,225 @@ def execute_tool(state: AgentState) -> dict:
     handler = tool_info["handler"]
     tool_output = handler(tool_input)
 
+    next_iterations = state.get("iterations", 0) + 1
+
     return {
         "tool_output": tool_output,
+        "iterations": next_iterations,
         "status": "tool_executed" if tool_output.get("success") else "failed",
+        "tool_history": [
+            {
+                "step": state.get("current_step", {}),
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "tool_output": tool_output,
+                "risk_level": tool_info.get("risk_level"),
+                "approved": state.get("approved"),
+            }
+        ],
         "step_logs": [
             {
                 "node": "execute_tool",
                 "message": f"执行工具 {tool_name}，结果：{tool_output}",
                 "status": "tool_executed" if tool_output.get("success") else "failed",
+            }
+        ],
+    }
+
+def update_plan_step(state: AgentState) -> dict:
+    """
+    根据刚刚的工具执行结果，更新当前计划步骤状态
+    """
+    plan_steps = state.get("plan_steps", [])
+    current_step = state.get("current_step", {})
+    tool_output = state.get("tool_output", {})
+
+    if not plan_steps or not current_step:
+        return {
+            "plan_steps": plan_steps,
+            "current_step": {},
+            "step_logs": [
+                {
+                    "node": "update_plan_step",
+                    "message": "没有可更新的计划步骤",
+                    "status": "planned",
+                }
+            ],
+        }
+
+    current_index = current_step.get("index")
+
+    updated_steps = []
+    for step in plan_steps:
+        if step.get("index") == current_index:
+            updated_steps.append(
+                {
+                    **step,
+                    "status": "completed" if tool_output.get("success") else "failed",
+                }
+            )
+        else:
+            updated_steps.append(step)
+
+    next_step = {}
+    for step in updated_steps:
+        if step.get("status") == "pending":
+            next_step = step
+            break
+
+    return {
+        "plan_steps": updated_steps,
+        "current_step": next_step,
+        "status": "plan_updated",
+        "step_logs": [
+            {
+                "node": "update_plan_step",
+                "message": f"更新计划步骤 {current_index}，下一步：{next_step or '无'}",
+                "status": "plan_updated",
+            }
+        ],
+    }
+
+
+def decide_next_step(state: AgentState) -> dict:
+    """
+    判断任务是否需要继续调用工具
+    """
+    iterations = state.get("iterations", 0)
+    max_iterations = state.get("max_iterations", 3)
+
+    if iterations >= max_iterations:
+        return {
+            "next_action": "finish",
+            "status": "decided",
+            "step_logs": [
+                {
+                    "node": "decide_next_step",
+                    "message": f"已达到最大执行轮次 {max_iterations}，结束任务",
+                    "status": "decided",
+                }
+            ],
+        }
+    
+    current_step = state.get("current_step", {})
+    plan_steps = state.get("plan_steps", [])
+    if not current_step:
+        return{
+            "next_action": "finish",
+            "status": "decided",
+            "step_logs": [{
+                "node": "decide_next_step",
+                "message": f"没有当前步骤，结束任务",
+                "status": "decided",
+            }]
+        }
+    
+    if not state.get("tool_output", {}).get("success", False):
+        return {
+            "next_action": "finish",
+            "status": "decided",
+            "step_logs": [
+                {
+                    "node": "decide_next_step",
+                    "message": f"工具执行失败，结束任务",
+                    "status": "decided",
+                }
+            ],
+        }
+
+    current_step_description = str(current_step.get("description", ""))
+    finish_keywords = ["总结", "分析", "回答", "回复", "归纳", "说明", "解析"]
+    if any(keyword in current_step_description for keyword in finish_keywords):
+        return {
+            "next_action": "finish",
+            "status": "decided",
+            "step_logs": [
+                {
+                    "node": "decide_next_step",
+                    "message": f"当前步骤适合直接生成最终回答：{current_step}",
+                    "status": "decided",
+                }
+            ],
+        }
+
+    if current_step and state.get("tool_output", {}).get("success"):
+        return {
+        "next_action": "continue",
+        "status": "decided",
+        "step_logs": [
+            {
+                "node": "decide_next_step",
+                "message": f"还有待执行步骤：{current_step}",
+                "status": "decided",
+            }
+        ],
+    }
+
+    prompt = f"""
+你是 Agent 的任务进度判断节点。
+
+用户任务：
+{state["Task"]}
+
+执行计划：
+{state.get("plan", [])}
+
+已执行工具历史：
+{state.get("tool_history", [])}
+
+当前执行轮次：
+{iterations}
+
+最大执行轮次：
+{max_iterations}
+
+请判断用户任务是否已经完成。
+
+判断规则：
+1. 如果工具历史已经足够回答用户任务，返回 finish。
+2. 如果用户任务明确包含多个步骤，并且还有步骤没有执行，返回 continue。
+3. 如果继续执行也不会获得更多有用信息，返回 finish。
+4. 如果不确定，优先返回 finish，避免重复循环。
+
+只返回 JSON，不要解释，不要 Markdown。
+格式：
+{{
+  "next_action": "continue 或 finish",
+  "reason": "简短原因"
+}}
+"""
+    result = invoke_llm_json(
+        prompt,
+        default={
+            "next_action": "finish",
+            "reason": "LLM 判断失败，默认结束",
+        },
+    )
+
+    if result.get("_error"):
+        return {
+            "next_action": "finish",
+            "status": "decided",
+            "error": f"decide_next_step 模型调用失败：{result['_error']}",
+            "step_logs": [
+                {
+                    "node": "decide_next_step",
+                    "message": f"判断失败，默认结束：{result['_error']}",
+                    "status": "decided",
+                }
+            ],
+        }
+    next_action = result.get("next_action", "finish")
+    if next_action not in ["continue", "finish"]:
+        next_action = "finish"
+    return {
+        "next_action": next_action,
+        "status": "decided",
+        "step_logs": [
+            {
+                "node": "decide_next_step",
+                "message": f"判断下一步动作：{next_action}，原因：{result.get('reason','无')}",
+                "status": "decided",
             }
         ],
     }
@@ -374,11 +591,20 @@ def finalize_task(state: AgentState) -> dict:
 用户计划：
 {state.get("plan", [])}
 
+结构化计划完成情况：
+{state.get("plan_steps", [])}
+
 工具名称：
 {state.get("selected_tool", "")}
 
 工具结果：
 {tool_output}
+
+最近一次工具结果：
+{tool_output}
+
+完整工具执行历史：
+{state.get("tool_history", [])}
 
 要求：
 1. 用简洁中文回答
@@ -386,15 +612,8 @@ def finalize_task(state: AgentState) -> dict:
 3. 不要编造工具结果中没有的信息
 """
 
-    llm = ChatOpenAI(
-        model=KIMI_MODEL,
-        temperature=1,
-        openai_api_key=KIMI_API_KEY,
-        base_url=KIMI_BASE_URL,
-    )
-
     try:
-        final_response = llm.invoke(prompt).content.strip()
+        final_response = invoke_llm(prompt)
     except Exception as e:
         return {
             "final_response": f"任务已执行，但生成最终回复时失败：{str(e)}",
@@ -431,5 +650,12 @@ def finalize_task(state: AgentState) -> dict:
 def route_after_approval(state: AgentState) -> str:
     if state.get("approved"):
         return "execute_tool"
+
+    return "finalize_task"
+
+
+def route_after_decide(state: AgentState) -> str:
+    if state.get("next_action") == "continue":
+        return "select_tool"
 
     return "finalize_task"

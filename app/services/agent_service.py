@@ -13,12 +13,18 @@ def run_task(task_text: str) -> dict:
 
 
     result = app.invoke(
-        {
-            "Task": task_text,
-            "status": "created",
-        },
-        config={"configurable": {"thread_id": thread_id}},
-    )
+    {
+        "Task": task_text,
+        "status": "created",
+        "iterations": 0,
+        "max_iterations": 3,
+        "tool_history": [],
+        "plan_steps": [],
+        "current_step": {},
+    },
+    config={"configurable": {"thread_id": thread_id}},
+)
+
 
     state_to_save = dict(result)
     if "__interrupt__" in result:
@@ -34,6 +40,8 @@ def run_task(task_text: str) -> dict:
 
     task_repo.update_task(task_id, state_to_save)
     task_repo.save_step_logs(task_id, state_to_save.get("step_logs", []))
+    task_repo.save_tool_calls(task_id, state_to_save.get("tool_history", []))
+
 
     return {
         "task_id": task_id,
@@ -52,6 +60,7 @@ def approve_task(task_id: int, thread_id: str, approved: bool) -> dict:
 
     task_repo.update_task(task_id, resumed)
     task_repo.save_step_logs(task_id, resumed.get("step_logs", []))
+    task_repo.save_tool_calls(task_id, resumed.get("tool_history", []))
 
     return {
         "task_id": task_id,

@@ -1,14 +1,12 @@
+import sys
+
 MCP_SERVERS = {
-    "bad": {
-        "transport": "stdio",
-        "command": ".venv/bin/python",
-        "args": ["not_exist.py"],
-        "env": None,
-    },
     "time": {
         "transport": "stdio",
-        "command": ".venv/bin/python",
+        "command": sys.executable,
         "args": ["-m", "mcp_server_time"],
         "env": None,
+        "risk_level": "low",
+        "tool_risk_levels": {},
     },
 }

@@ -32,6 +32,20 @@ export interface StepLog {
   created_at: string;
 }
 
+export interface ToolCall {
+  id: number;
+  task_id: number;
+  step_index: number | null;
+  step_description: string | null;
+  tool_name: string;
+  tool_input: unknown;
+  tool_output: unknown;
+  risk_level: string | null;
+  approved: boolean | null;
+  success: boolean | null;
+  created_at: string;
+}
+
 export interface TaskRunResult {
   status?: TaskStatus;
   selected_tool?: string;

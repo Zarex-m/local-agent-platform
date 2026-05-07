@@ -5,7 +5,8 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
-DATABASE_PATH = Path("data/agent.db")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATABASE_PATH = PROJECT_ROOT / "data" / "agent.db"
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 
@@ -44,6 +45,21 @@ class StepLog(Base):
     node: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+class ToolCall(Base):
+    __tablename__ = "tool_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    step_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tool_input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    risk_level: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

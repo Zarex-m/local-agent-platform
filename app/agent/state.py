@@ -18,5 +18,15 @@ class AgentState(TypedDict,total=False):
     approval_required: bool
     approval_reason: str | None
     
+    # 多步循环相关
+    iterations: int
+    max_iterations: int
+    next_action: str
+    tool_history: Annotated[list[dict], operator.add]
+    
     #日志
     step_logs: Annotated[list[dict], operator.add]
+    
+    #多步计划
+    plan_steps: list[dict]
+    current_step:dict

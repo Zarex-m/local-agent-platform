@@ -1,7 +1,7 @@
 from fastapi import APIRouter,HTTPException
 from app.services.agent_service import run_task,approve_task
 from app.schemas.tasks import TaskCreateRequest,TaskApproveRequest,TaskResponse,StepLogResponse
-from app.storage.task_repository import get_task,get_step_logs,list_tasks
+from app.storage.task_repository import get_task,get_step_logs,list_tasks,get_tool_calls
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -36,3 +36,7 @@ async def approve_task_api(task_id:int,request:TaskApproveRequest):
 @router.get("/",response_model=list[TaskResponse])
 async def list_task_items(limit:int=20):
     return list_tasks(limit)
+
+@router.get("/{task_id}/tool-calls")
+async def get_task_tool_calls(task_id: int):
+    return get_tool_calls(task_id)
