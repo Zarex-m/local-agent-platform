@@ -118,8 +118,37 @@ def run_task_background(
     config = {"configurable": {"thread_id": thread_id}}
     tool_history: list[dict] = []
 
+    def stop_if_cancelled() -> bool:
+        task = task_repo.get_task(task_id)
+        if not task or not getattr(task, "cancel_requested", False):
+            return False
+
+        task_repo.update_task(
+            task_id,
+            {
+                "status": "cancelled",
+                "approval_required": False,
+                "approval_reason": None,
+                "final_response": task.final_response or "任务已取消。",
+            },
+        )
+        task_repo.save_step_logs(
+            task_id,
+            [
+                {
+                    "node": "agent_service",
+                    "status": "cancelled",
+                    "message": "检测到取消请求，停止继续执行",
+                }
+            ],
+        )
+        return True
+
     try:
         for chunk in app.stream(initial_state, config=config, stream_mode="updates"):
+            if stop_if_cancelled():
+                return
+
             if "__interrupt__" in chunk:
                 interrupts = chunk.get("__interrupt__", [])
                 interrupt_value = interrupts[0].value if interrupts else {}
@@ -138,6 +167,9 @@ def run_task_background(
                 return
 
             for _node_name, update in chunk.items():
+                if stop_if_cancelled():
+                    return
+
                 if not isinstance(update, dict):
                     continue
 
@@ -149,6 +181,10 @@ def run_task_background(
                 if update.get("tool_history"):
                     tool_history.extend(update["tool_history"])
                     task_repo.save_tool_calls(task_id, tool_history)
+
+        if stop_if_cancelled():
+            return
+
         task = task_repo.get_task(task_id)
         if task and task.final_response and conversation_id is not None:
             conv_repo.append_message(

@@ -19,8 +19,10 @@ class TaskResponse(BaseModel):
     final_response: str | None
     approval_required: bool | None
     approval_reason: str | None
+    cancel_requested: bool
     created_at: datetime
     updated_at: datetime
+
     
 class StepLogResponse(BaseModel):
     id: int

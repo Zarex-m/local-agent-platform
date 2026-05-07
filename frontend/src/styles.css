@@ -292,7 +292,8 @@ h2 {
 
 .statusPill,
 .sourcePill,
-.miniStatus {
+.miniStatus,
+.cancelTaskButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -316,6 +317,21 @@ h2 {
   border: 1px solid #e3e3e8;
   background: #ffffff;
   font-size: 12px;
+}
+
+.cancelTaskButton {
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid #f0c4c4;
+  color: #9f2727;
+  background: #fff5f5;
+  font-size: 12px;
+}
+
+.cancelTaskButton:hover:not(:disabled) {
+  border-color: #e9a8a8;
+  background: #ffeaea;
 }
 
 .errorBanner {

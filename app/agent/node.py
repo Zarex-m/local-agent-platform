@@ -672,6 +672,36 @@ def finalize_task(state: AgentState) -> dict:
     task_id = state.get("task_id")
     should_stream = bool(state.get("stream_final_response") and task_id)
 
+    def stop_if_cancelled_during_stream() -> dict | None:
+        if not task_id:
+            return None
+
+        task = task_repo.get_task(task_id)
+        if not task or not getattr(task, "cancel_requested", False):
+            return None
+
+        cancelled_response = final_response or "任务已取消。"
+        task_repo.update_task(
+            task_id,
+            {
+                "status": "cancelled",
+                "final_response": cancelled_response,
+                "approval_required": False,
+                "approval_reason": None,
+            },
+        )
+        return {
+            "final_response": cancelled_response,
+            "status": "cancelled",
+            "step_logs": [
+                {
+                    "node": "finalize_task",
+                    "message": "生成回复时收到取消请求",
+                    "status": "cancelled",
+                }
+            ],
+        }
+
     try:
         if should_stream:
             task_repo.update_task(
@@ -684,6 +714,10 @@ def finalize_task(state: AgentState) -> dict:
             last_flush_at = time.monotonic()
 
             for token in invoke_llm_stream(prompt):
+                cancelled_result = stop_if_cancelled_during_stream()
+                if cancelled_result:
+                    return cancelled_result
+
                 final_response += token
                 now = time.monotonic()
 

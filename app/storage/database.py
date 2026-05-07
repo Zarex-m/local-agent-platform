@@ -30,12 +30,14 @@ class Task(Base):
     approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     approval_required: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     approval_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
+
 
 
 class StepLog(Base):

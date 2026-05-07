@@ -94,3 +94,9 @@ export function approveTask(taskId: number, approved: boolean): Promise<TaskRunR
     body: JSON.stringify({ approved }),
   });
 }
+
+export function cancelTask(taskId: number): Promise<{ task_id: number; status: string }> {
+  return request<{ task_id: number; status: string }>(`/tasks/${taskId}/cancel`, {
+    method: "POST",
+  });
+}

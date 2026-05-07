@@ -8,6 +8,7 @@ export type TaskStatus =
   | "tool_executed"
   | "completed"
   | "failed"
+  | "cancelled"
   | "rejected"
   | string;
 

@@ -6,7 +6,14 @@ from app.services.agent_service import (
     create_task_job,
 )
 from app.schemas.tasks import TaskCreateRequest,TaskApproveRequest,TaskResponse,StepLogResponse
-from app.storage.task_repository import get_task,get_step_logs,list_tasks,get_tool_calls
+from app.storage.task_repository import (
+    get_task,
+    get_step_logs,
+    list_tasks,
+    get_tool_calls,
+    request_cancel_task,
+)
+
 import asyncio
 import json
 from fastapi.responses import StreamingResponse
@@ -138,3 +145,17 @@ async def stream_task_events(task_id: int):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
     )
+
+@router.post("/{task_id}/cancel")
+async def cancel_task_api(task_id: int):
+    task = get_task(task_id)
+
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status in {"completed", "failed", "rejected", "cancelled"}:
+        return {"task_id": task_id, "status": task.status}
+
+    request_cancel_task(task_id)
+
+    return {"task_id": task_id, "status": "cancelled"}

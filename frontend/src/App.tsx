@@ -17,9 +17,11 @@ import {
   User,
   Wrench,
   X,
+  StopCircle,
 } from "lucide-react";
 import {
   approveTask,
+  cancelTask,
   createTaskEventSource,
   deleteConversation,
   getConversation,
@@ -37,6 +39,7 @@ const statusLabels: Record<string, string> = {
   completed: "已完成",
   pending_approval: "待审批",
   failed: "失败",
+  cancelled: "已取消",
   rejected: "已拒绝",
   running: "运行中",
   finalizing: "生成回复中",
@@ -99,7 +102,12 @@ function riskTone(risk?: string | null) {
 }
 
 function isTerminalStatus(status?: string | null) {
-  return status === "completed" || status === "failed" || status === "rejected";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "rejected" ||
+    status === "cancelled"
+  );
 }
 
 type TimelineState = "pending" | "active" | "success" | "warning" | "failed";
@@ -171,6 +179,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -414,6 +423,24 @@ export default function App() {
     }
   }
 
+  async function handleCancelTask() {
+    if (!selectedTask || isTerminalStatus(selectedTask.status)) return;
+
+    setIsCancelling(true);
+    setError(null);
+
+    try {
+      await cancelTask(selectedTask.id);
+      closeTaskStream();
+      await refreshTaskSnapshot(selectedTask.id, { silent: true });
+      await refreshConversationList();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取消任务失败");
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
   async function handleRenameConversation(conversation: Conversation) {
     const currentTitle = conversation.title ?? conversation.latest_task_title ?? "";
     const title = window.prompt("修改会话标题", currentTitle)?.trim();
@@ -533,6 +560,7 @@ export default function App() {
   const selectedStatus =
     selectedTask?.status ?? activeConversation?.latest_task_status ?? "created";
   const needsApproval = selectedTask?.status === "pending_approval";
+  const canCancelTask = Boolean(selectedTask && !isTerminalStatus(selectedTask.status));
   const sourceLabel = toolSource(selectedTask?.selected_tool);
   const hasPersistedAssistantForTask = Boolean(
     selectedTask &&
@@ -616,13 +644,15 @@ export default function App() {
       ? "任务已完成"
       : selectedTask?.status === "failed"
         ? "任务执行失败"
-        : selectedTask?.status === "rejected"
-          ? "任务已拒绝"
-          : selectedTask?.status === "pending_approval"
-            ? "等待审批"
-            : currentTimelineStep
-              ? `正在${currentTimelineStep.label}`
-              : "Agent 正在运行";
+        : selectedTask?.status === "cancelled"
+          ? "任务已取消"
+          : selectedTask?.status === "rejected"
+            ? "任务已拒绝"
+            : selectedTask?.status === "pending_approval"
+              ? "等待审批"
+              : currentTimelineStep
+                ? `正在${currentTimelineStep.label}`
+                : "Agent 正在运行";
   const currentProgressDetail =
     selectedTask?.status === "pending_approval"
       ? selectedTask.approval_reason ?? "有高风险操作需要确认。"
@@ -772,6 +802,22 @@ export default function App() {
                 <Wrench size={14} />
                 {sourceLabel}
               </span>
+              {canCancelTask && (
+                <button
+                  className="cancelTaskButton"
+                  disabled={isCancelling}
+                  onClick={handleCancelTask}
+                  title="停止生成"
+                  type="button"
+                >
+                  {isCancelling ? (
+                    <Loader2 className="spin" size={14} />
+                  ) : (
+                    <StopCircle size={14} />
+                  )}
+                  停止生成
+                </button>
+              )}
             </div>
           </header>
         )}

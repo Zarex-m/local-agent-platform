@@ -200,3 +200,27 @@ def append_step_log(task_id: int, node: str, status: str, message: str) -> None:
         db.commit()
     finally:
         db.close()
+
+def request_cancel_task(task_id: int) -> None:
+    update_task(
+        task_id,
+        {
+            "cancel_requested": True,
+            "status": "cancelled",
+            "approval_required": False,
+            "approval_reason": None,
+            "final_response": "任务已取消。",
+        },
+    )
+
+    append_step_log(
+        task_id,
+        node="agent_service",
+        status="cancelled",
+        message="用户请求取消任务",
+    )
+
+
+def is_cancel_requested(task_id: int) -> bool:
+    task = get_task(task_id)
+    return bool(task and task.cancel_requested)
