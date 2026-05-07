@@ -4,6 +4,8 @@ from typing_extensions import Annotated
 import operator
 
 class AgentState(TypedDict,total=False):
+    task_id:int
+    stream_final_response:bool
     Task:str
     status:str #状态：待执行、执行中、已完成、失败
     plan:list[str] #计划

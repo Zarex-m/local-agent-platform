@@ -35,6 +35,7 @@ const statusLabels: Record<string, string> = {
   failed: "失败",
   rejected: "已拒绝",
   running: "运行中",
+  finalizing: "生成回复中",
   tool_selected: "已选工具",
   tool_executed: "已执行",
   approved: "已批准",
@@ -164,6 +165,29 @@ export default function App() {
     source.addEventListener("task", refreshFromStream);
     source.addEventListener("log", refreshFromStream);
     source.addEventListener("tool_call", refreshFromStream);
+
+    source.addEventListener("final_response", (event) => {
+      if (eventSourceRef.current !== source) return;
+
+      try {
+        const data = JSON.parse((event as MessageEvent).data) as {
+          final_response?: string;
+          status?: string;
+        };
+
+        setSelectedTask((current) => {
+          if (!current || current.id !== taskId) return current;
+
+          return {
+            ...current,
+            status: data.status ?? current.status,
+            final_response: data.final_response ?? current.final_response,
+          };
+        });
+      } catch {
+        refreshFromStream();
+      }
+    });
 
     source.addEventListener("done", () => {
       refreshFromStream();

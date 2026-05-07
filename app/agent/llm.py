@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from dotenv import load_dotenv
@@ -39,6 +40,24 @@ def invoke_llm(prompt: str, retries: int = 2, sleep_seconds: float = 1.0) -> str
                 time.sleep(sleep_seconds)
 
     raise last_error or RuntimeError("LLM 调用失败")
+
+
+def invoke_llm_stream(prompt: str) -> Iterator[str]:
+    """
+    流式调用 LLM，逐块返回文本。
+    """
+    llm = create_llm()
+
+    for chunk in llm.stream(prompt):
+        content = chunk.content
+        if not content:
+            continue
+
+        if isinstance(content, str):
+            yield content
+            continue
+
+        yield str(content)
 
 
 def clean_json_content(content: str) -> str:

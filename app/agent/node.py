@@ -1,5 +1,8 @@
+import time
+
 from app.agent.state import AgentState
-from app.agent.llm import invoke_llm, invoke_llm_json
+from app.agent.llm import invoke_llm, invoke_llm_json, invoke_llm_stream
+from app.storage import task_repository as task_repo
 from app.tools.registry import TOOL_REGISTRY, get_tools_text
 from langgraph.types import interrupt
 
@@ -582,6 +585,14 @@ def finalize_task(state: AgentState) -> dict:
     """
     tool_output = state.get("tool_output", {})
 
+    if state.get("status") == "pending_approval":
+        return {
+            "final_response": state.get("approval_reason", "该操作需要用户审批"),
+            "status": "pending_approval",
+        }
+
+    final_status = "completed" if tool_output.get("success") else "failed"
+
     prompt = f"""
 根据工具执行结果，生成对用户的最终响应。
 
@@ -612,35 +623,76 @@ def finalize_task(state: AgentState) -> dict:
 3. 不要编造工具结果中没有的信息
 """
 
+    final_response = ""
+    task_id = state.get("task_id")
+    should_stream = bool(state.get("stream_final_response") and task_id)
+
     try:
-        final_response = invoke_llm(prompt)
+        if should_stream:
+            task_repo.update_task(
+                task_id,
+                {
+                    "status": "finalizing",
+                    "final_response": "",
+                },
+            )
+            last_flush_at = time.monotonic()
+
+            for token in invoke_llm_stream(prompt):
+                final_response += token
+                now = time.monotonic()
+
+                if now - last_flush_at >= 0.08:
+                    task_repo.update_task(
+                        task_id,
+                        {
+                            "status": "finalizing",
+                            "final_response": final_response,
+                        },
+                    )
+                    last_flush_at = now
+
+            task_repo.update_task(
+                task_id,
+                {
+                    "status": final_status,
+                    "final_response": final_response,
+                },
+            )
+        else:
+            final_response = invoke_llm(prompt)
     except Exception as e:
+        fallback_response = final_response or f"任务已执行，但生成最终回复时失败：{str(e)}"
+        if should_stream:
+            task_repo.update_task(
+                task_id,
+                {
+                    "status": final_status,
+                    "final_response": fallback_response,
+                },
+            )
+
         return {
-            "final_response": f"任务已执行，但生成最终回复时失败：{str(e)}",
-            "status": "completed" if tool_output.get("success") else "failed",
+            "final_response": fallback_response,
+            "status": final_status,
             "error": f"finalize_task 模型调用失败：{str(e)}",
             "step_logs": [
                 {
                     "node": "finalize_task",
                     "message": f"模型调用失败，使用兜底回复：{str(e)}",
-                    "status": "completed" if tool_output.get("success") else "failed",
+                    "status": final_status,
                 }
             ],
         }
 
-    if state.get("status") == "pending_approval":
-        return {
-            "final_response": state.get("approval_reason", "该操作需要用户审批"),
-            "status": "pending_approval",
-        }
     return {
         "final_response": final_response,
-        "status": "completed" if tool_output.get("success") else "failed",
+        "status": final_status,
         "step_logs": [
             {
                 "node": "finalize_task",
-                "message": f"生成最终响应，状态：{'completed' if tool_output.get('success') else 'failed'}",
-                "status": "completed" if tool_output.get("success") else "failed",
+                "message": f"生成最终响应，状态：{final_status}",
+                "status": final_status,
             }
         ],
     }

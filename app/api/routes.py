@@ -71,6 +71,7 @@ async def stream_task_events(task_id: int):
         last_log_id = 0
         last_tool_call_id = 0
         last_status = None
+        last_final_response = None
 
         while True:
             task = get_task(task_id)
@@ -89,6 +90,18 @@ async def stream_task_events(task_id: int):
                         "final_response": task.final_response,
                         "approval_required": task.approval_required,
                         "approval_reason": task.approval_reason,
+                    },
+                )
+
+            current_final_response = task.final_response or ""
+            if current_final_response != last_final_response:
+                last_final_response = current_final_response
+                yield sse_event(
+                    "final_response",
+                    {
+                        "id": task.id,
+                        "status": task.status,
+                        "final_response": current_final_response,
                     },
                 )
 
@@ -117,7 +130,7 @@ async def stream_task_events(task_id: int):
                 yield sse_event("done", {"task_id": task_id, "status": task.status})
                 return
 
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.2)
 
     return StreamingResponse(
         event_generator(),

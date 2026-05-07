@@ -9,7 +9,7 @@ def run_task(task_text: str) -> dict:
     init_db()
 
     thread_id = str(uuid4())
-    task_id = task_repo.create_task(task_text, thread_id)
+    task_id = task_repo.create_task(task_text, thread_id, status="running")
 
 
     result = app.invoke(
@@ -86,6 +86,8 @@ def run_task_background(task_id: int, thread_id: str, task_text: str) -> None:
     init_db()
 
     initial_state = {
+        "task_id": task_id,
+        "stream_final_response": True,
         "Task": task_text,
         "status": "created",
         "iterations": 0,
