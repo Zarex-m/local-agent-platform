@@ -1,10 +1,17 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from app.storage.database import Conversation, Message, SessionLocal, Task
+from app.storage.database import (
+    Conversation,
+    Message,
+    SessionLocal,
+    StepLog,
+    Task,
+    ToolCall,
+)
 
-
+#把conversation的相关信息转化为dict，让前端更好使用
 def _conversation_payload(db, conversation: Conversation) -> dict:
     latest_task_stmt = (
         select(Task)
@@ -37,7 +44,7 @@ def create_conversation(title: str | None = None) -> int:
     finally:
         db.close()
 
-
+#获取最近的会话列表
 def list_conversations(limit: int = 30) -> list[dict]:
     db = SessionLocal()
     try:
@@ -51,7 +58,7 @@ def list_conversations(limit: int = 30) -> list[dict]:
     finally:
         db.close()
 
-
+#根据id获取会话详情
 def get_conversation(conversation_id: int) -> dict | None:
     db = SessionLocal()
     try:
@@ -106,7 +113,7 @@ def get_recent_messages(conversation_id: int, limit: int = 10) -> list[Message]:
     finally:
         db.close()
 
-
+#获取全部信息
 def get_messages(conversation_id: int) -> list[Message]:
     db = SessionLocal()
     try:
@@ -118,3 +125,52 @@ def get_messages(conversation_id: int) -> list[Message]:
         return db.execute(stmt).scalars().all()
     finally:
         db.close()
+
+#更新会话
+def update_conversation(
+    conversation_id:int,
+    title: str | None = None,
+    summary: str | None = None,
+)->dict|None:
+    db=SessionLocal()
+    try:
+        conversation=db.get(Conversation, conversation_id)
+        if conversation is None:
+            return None
+        if title is not None:
+            conversation.title=title
+        if summary is not None:
+            conversation.summary=summary
+        conversation.updated_at=datetime.utcnow()
+        db.commit()
+        db.refresh(conversation)
+        return _conversation_payload(db, conversation)
+    finally:
+        db.close()
+
+#删除会话    
+def delete_conversation(conversation_id:int)->bool:
+    db=SessionLocal()
+    try:
+        conversation=db.get(Conversation,conversation_id)
+        if conversation is None:
+            return False
+        #获取该会话下的所有任务id
+        task_ids=db.execute(
+            select(Task.id).where(Task.conversation_id==conversation_id)
+        ).scalars().all()
+        if task_ids:
+            #删除相关的步骤日志、工具调用记录和任务记录
+            db.execute(delete(StepLog).where(StepLog.task_id.in_(task_ids)))
+            db.execute(delete(ToolCall).where(ToolCall.task_id.in_(task_ids)))
+            db.execute(delete(Task).where(Task.id.in_(task_ids)))
+            
+        db.execute(delete(Message).where(Message.conversation_id==conversation_id))
+        db.delete(conversation)
+        db.commit()
+        return True
+    finally:
+        db.close()
+        
+        
+    

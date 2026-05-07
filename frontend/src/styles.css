@@ -153,14 +153,29 @@ h2 {
 
 .conversationItem {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   min-height: 56px;
-  padding: 10px 11px;
-  border: 0;
+  padding: 4px;
   border-radius: 15px;
   color: #252a31;
+  background: transparent;
+}
+
+.conversationSelect {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 7px;
+  border: 0;
+  border-radius: 12px;
+  color: inherit;
   text-align: left;
   background: transparent;
 }
@@ -170,6 +185,34 @@ h2 {
   box-shadow:
     0 8px 20px rgba(38, 45, 57, 0.08),
     inset 0 0 0 1px #e0e5ee;
+}
+
+.conversationActions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.conversationItem.active .conversationActions,
+.conversationItem:hover .conversationActions {
+  opacity: 1;
+}
+
+.conversationActions button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 9px;
+  color: #747b86;
+  background: transparent;
+}
+
+.conversationActions button:hover {
+  color: #202123;
+  background: #eef0f4;
 }
 
 .dot {

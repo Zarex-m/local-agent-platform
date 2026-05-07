@@ -49,3 +49,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+
+class ConversationUpdateRequest(BaseModel):
+    title: str | None = None
+    summary: str | None = None

@@ -3,6 +3,7 @@ import {
   Bot,
   Check,
   Clock3,
+  Trash2,
   FileText,
   Globe2,
   Loader2,
@@ -20,6 +21,7 @@ import {
 import {
   approveTask,
   createTaskEventSource,
+  deleteConversation,
   getConversation,
   getConversationMessages,
   getTask,
@@ -27,6 +29,7 @@ import {
   getTaskToolCalls,
   listConversations,
   submitTask,
+  updateConversation,
 } from "./api";
 import type { Conversation, ConversationMessage, StepLog, Task, ToolCall } from "./types";
 
@@ -121,6 +124,17 @@ export default function App() {
   function closeTaskStream() {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
+  }
+
+  function resetConversationView() {
+    closeTaskStream();
+    setSelectedConversation(null);
+    setSelectedTask(null);
+    setMessages([]);
+    setLogs([]);
+    setToolCalls([]);
+    setConversationId(null);
+    setShowTrace(false);
   }
 
   async function refreshTaskSnapshot(taskId: number, options?: { silent?: boolean }) {
@@ -347,6 +361,60 @@ export default function App() {
     }
   }
 
+  async function handleRenameConversation(conversation: Conversation) {
+    const currentTitle = conversation.title ?? conversation.latest_task_title ?? "";
+    const title = window.prompt("修改会话标题", currentTitle)?.trim();
+
+    if (!title || title === currentTitle) return;
+
+    setError(null);
+
+    try {
+      const updatedConversation = await updateConversation(conversation.id, { title });
+
+      setConversations((current) =>
+        current.map((item) =>
+          item.id === updatedConversation.id ? updatedConversation : item,
+        ),
+      );
+
+      if (conversationId === updatedConversation.id) {
+        setSelectedConversation(updatedConversation);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "修改会话标题失败");
+    }
+  }
+
+  async function handleDeleteConversation(conversation: Conversation) {
+    const title = conversation.title ?? conversation.latest_task_title ?? "这个会话";
+    const confirmed = window.confirm(`确定删除「${title}」吗？删除后无法在历史中查看。`);
+
+    if (!confirmed) return;
+
+    setError(null);
+
+    try {
+      await deleteConversation(conversation.id);
+
+      if (conversationId === conversation.id) {
+        resetConversationView();
+      }
+
+      const nextConversations = await refreshConversationList();
+
+      if (conversationId === conversation.id) {
+        return;
+      }
+
+      if (!nextConversations.some((item) => item.id === conversationId)) {
+        resetConversationView();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除会话失败");
+    }
+  }
+
   useEffect(() => {
     void refreshConversations();
 
@@ -408,7 +476,7 @@ export default function App() {
       : null);
   const hasActiveChat = Boolean(activeConversation || selectedTask || messages.length > 0);
   const workspaceTitle =
-    selectedTask?.task ?? activeConversation?.title ?? activeConversation?.latest_task_title ?? "新对话";
+    activeConversation?.title ?? selectedTask?.task ?? activeConversation?.latest_task_title ?? "新对话";
   const selectedStatus =
     selectedTask?.status ?? activeConversation?.latest_task_status ?? "created";
   const needsApproval = selectedTask?.status === "pending_approval";
@@ -490,14 +558,7 @@ export default function App() {
         <button
           className="newChatButton"
           onClick={() => {
-            closeTaskStream();
-            setSelectedConversation(null);
-            setSelectedTask(null);
-            setMessages([]);
-            setLogs([]);
-            setToolCalls([]);
-            setConversationId(null);
-            setShowTrace(false);
+            resetConversationView();
             setTaskText("");
           }}
           type="button"
@@ -516,25 +577,48 @@ export default function App() {
             <div className="emptyConversationList">暂无历史会话</div>
           )}
           {conversations.map((conversation) => (
-            <button
+            <div
               className={`conversationItem ${conversationId === conversation.id ? "active" : ""}`}
               key={conversation.id}
-              onClick={() => selectConversation(conversation.id)}
-              type="button"
             >
-              <span className={`dot ${statusTone(conversation.latest_task_status ?? "created")}`} />
-              <span className="conversationCopy">
-                <strong>{conversation.title ?? conversation.latest_task_title ?? "新会话"}</strong>
-                <small>
-                  #{conversation.id} ·{" "}
-                  {conversation.latest_task_status
-                    ? statusLabels[conversation.latest_task_status] ??
-                      conversation.latest_task_status
-                    : "会话"}{" "}
-                  · {formatTime(conversation.updated_at)}
-                </small>
-              </span>
-            </button>
+              <button
+                className="conversationSelect"
+                onClick={() => selectConversation(conversation.id)}
+                type="button"
+              >
+                <span className={`dot ${statusTone(conversation.latest_task_status ?? "created")}`} />
+                <span className="conversationCopy">
+                  <strong>{conversation.title ?? conversation.latest_task_title ?? "新会话"}</strong>
+                  <small>
+                    #{conversation.id} ·{" "}
+                    {conversation.latest_task_status
+                      ? statusLabels[conversation.latest_task_status] ??
+                        conversation.latest_task_status
+                      : "会话"}{" "}
+                    · {formatTime(conversation.updated_at)}
+                  </small>
+                </span>
+              </button>
+
+              <div className="conversationActions">
+                <button
+                  aria-label="重命名会话"
+                  onClick={() => handleRenameConversation(conversation)}
+                  title="重命名"
+                  type="button"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  aria-label="删除会话"
+                  onClick={() => handleDeleteConversation(conversation)}
+                  title="删除"
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       </aside>

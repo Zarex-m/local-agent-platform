@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.tasks import ConversationResponse, MessageResponse
+from app.schemas.tasks import ConversationResponse, MessageResponse, ConversationUpdateRequest
+from app.storage.conversation_repository import update_conversation,delete_conversation
 from app.storage.conversation_repository import (
     get_conversation,
     get_messages,
@@ -31,3 +32,21 @@ async def get_conversation_message_items(conversation_id: int):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     return get_messages(conversation_id)
+
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation_api(conversation_id: int, request: ConversationUpdateRequest):
+    conversation = update_conversation(
+        conversation_id,
+        title=request.title,
+        summary=request.summary,
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+@router.delete("/{conversation_id}")
+async def delete_conversation_api(conversation_id: int):
+    ok = delete_conversation(conversation_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"success": True}

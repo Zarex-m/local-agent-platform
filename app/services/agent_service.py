@@ -5,7 +5,11 @@ from app.storage.database import init_db
 from app.storage import task_repository as task_repo
 from uuid import uuid4
 from app.storage import conversation_repository as conv_repo
-from app.memory.conversation_memory import build_conversation_context
+from app.memory.conversation_memory import (
+    build_conversation_context,
+    refresh_conversation_summary,
+)
+
 
 def run_task(task_text: str) -> dict:
     init_db()
@@ -13,20 +17,18 @@ def run_task(task_text: str) -> dict:
     thread_id = str(uuid4())
     task_id = task_repo.create_task(task_text, thread_id, status="running")
 
-
     result = app.invoke(
-    {
-        "Task": task_text,
-        "status": "created",
-        "iterations": 0,
-        "max_iterations": 3,
-        "tool_history": [],
-        "plan_steps": [],
-        "current_step": {},
-    },
-    config={"configurable": {"thread_id": thread_id}},
-)
-
+        {
+            "Task": task_text,
+            "status": "created",
+            "iterations": 0,
+            "max_iterations": 3,
+            "tool_history": [],
+            "plan_steps": [],
+            "current_step": {},
+        },
+        config={"configurable": {"thread_id": thread_id}},
+    )
 
     state_to_save = dict(result)
     if "__interrupt__" in result:
@@ -43,7 +45,6 @@ def run_task(task_text: str) -> dict:
     task_repo.update_task(task_id, state_to_save)
     task_repo.save_step_logs(task_id, state_to_save.get("step_logs", []))
     task_repo.save_tool_calls(task_id, state_to_save.get("tool_history", []))
-
 
     return {
         "task_id": task_id,
@@ -70,24 +71,32 @@ def approve_task(task_id: int, thread_id: str, approved: bool) -> dict:
         "result": resumed,
     }
 
-def create_task_job(task_text:str,conversation_id:int|None=None)->dict:
+
+def create_task_job(task_text: str, conversation_id: int | None = None) -> dict:
     init_db()
 
     if conversation_id is None:
         conversation_id = conv_repo.create_conversation(title=task_text[:40])
 
     thread_id = str(uuid4())
-    task_id = task_repo.create_task(task_text, thread_id, status="running", conversation_id=conversation_id)
+    task_id = task_repo.create_task(
+        task_text, thread_id, status="running", conversation_id=conversation_id
+    )
 
-    conv_repo.append_message(conversation_id, role="user", content=task_text, task_id=task_id)
+    conv_repo.append_message(
+        conversation_id, role="user", content=task_text, task_id=task_id
+    )
     return {
         "task_id": task_id,
         "thread_id": thread_id,
         "conversation_id": conversation_id,
         "result": {"status": "running"},
     }
-    
-def run_task_background(task_id: int, thread_id: str, task_text: str,conversation_id: int | None = None) -> None:
+
+
+def run_task_background(
+    task_id: int, thread_id: str, task_text: str, conversation_id: int | None = None
+) -> None:
     init_db()
 
     conversation_context = build_conversation_context(conversation_id)
@@ -103,7 +112,7 @@ def run_task_background(task_id: int, thread_id: str, task_text: str,conversatio
         "plan_steps": [],
         "current_step": {},
         "conversation_id": conversation_id,
-    "conversation_context": conversation_context,
+        "conversation_context": conversation_context,
     }
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -148,7 +157,7 @@ def run_task_background(task_id: int, thread_id: str, task_text: str,conversatio
                 task.final_response,
                 task_id,
             )
-
+            refresh_conversation_summary(conversation_id)
     except Exception as e:
         task_repo.update_task(
             task_id,

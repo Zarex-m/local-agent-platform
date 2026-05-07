@@ -44,6 +44,24 @@ export function getConversationMessages(
   return request<ConversationMessage[]>(`/conversations/${conversationId}/messages`);
 }
 
+export function updateConversation(
+  conversationId: number,
+  payload: { title?: string; summary?: string },
+): Promise<Conversation> {
+  return request<Conversation>(`/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteConversation(
+  conversationId: number,
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/conversations/${conversationId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getTask(taskId: number): Promise<Task> {
   return request<Task>(`/tasks/${taskId}`);
 }
