@@ -25,6 +25,9 @@ def plan_task(state: AgentState) -> dict:
 2. 不要写教程
 3. 不要写 Markdown 表格
 4. 每一步只保留一句话
+对话历史：
+{state.get("conversation_context", "")}
+
 """
 
     try:
@@ -103,6 +106,10 @@ def select_tool(state: AgentState) -> dict:
 
 可用工具：
 {tools_text}
+
+对话历史：
+{state.get("conversation_context", "")}
+
 
 工具选择规则：
 1. 如果用户要列出目录、查看目录下有哪些文件、查看项目结构，选择 list_files。
@@ -616,6 +623,8 @@ def finalize_task(state: AgentState) -> dict:
 
 完整工具执行历史：
 {state.get("tool_history", [])}
+对话历史：
+{state.get("conversation_context", "")}
 
 要求：
 1. 用简洁中文回答

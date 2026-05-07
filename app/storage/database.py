@@ -16,6 +16,7 @@ class Base(DeclarativeBase):
 
 class Task(Base):
     __tablename__ = "tasks"
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task: Mapped[str] = mapped_column(Text, nullable=False)
@@ -60,6 +61,30 @@ class ToolCall(Base):
     risk_level: Mapped[str | None] = mapped_column(String(50), nullable=True)
     approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

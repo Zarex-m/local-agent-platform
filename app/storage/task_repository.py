@@ -8,6 +8,7 @@ def create_task(
     task_text: str,
     thread_id: str,
     status: str = "created",
+    conversation_id:int | None = None,
 ) -> int:
     db = SessionLocal()
 
@@ -16,6 +17,7 @@ def create_task(
             task=task_text,
             status=status,
             thread_id=thread_id,
+            conversation_id=conversation_id,
         )
 
         db.add(task)

@@ -15,14 +15,15 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 @router.post("/")
 async def submit_task(request: TaskCreateRequest,background_tasks: BackgroundTasks):
-    payload=create_task_job(request.task)
-    
+    payload = create_task_job(request.task, request.conversation_id)
+
     background_tasks.add_task(
-        run_task_background,
-        payload["task_id"],
-        payload["thread_id"],
-        request.task,
-    )
+    run_task_background,
+    payload["task_id"],
+    payload["thread_id"],
+    request.task,
+    payload["conversation_id"],
+)
     
     return payload
 

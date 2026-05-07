@@ -1,4 +1,11 @@
-import type { StepLog, Task, TaskRunResponse, ToolCall } from "./types";
+import type {
+  Conversation,
+  ConversationMessage,
+  StepLog,
+  Task,
+  TaskRunResponse,
+  ToolCall,
+} from "./types";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -23,6 +30,20 @@ export function listTasks(limit = 20): Promise<Task[]> {
   return request<Task[]>(`/tasks/?limit=${limit}`);
 }
 
+export function listConversations(limit = 30): Promise<Conversation[]> {
+  return request<Conversation[]>(`/conversations/?limit=${limit}`);
+}
+
+export function getConversation(conversationId: number): Promise<Conversation> {
+  return request<Conversation>(`/conversations/${conversationId}`);
+}
+
+export function getConversationMessages(
+  conversationId: number,
+): Promise<ConversationMessage[]> {
+  return request<ConversationMessage[]>(`/conversations/${conversationId}/messages`);
+}
+
 export function getTask(taskId: number): Promise<Task> {
   return request<Task>(`/tasks/${taskId}`);
 }
@@ -39,10 +60,13 @@ export function createTaskEventSource(taskId: number): EventSource {
   return new EventSource(`${API_BASE_URL}/tasks/${taskId}/events`);
 }
 
-export function submitTask(task: string): Promise<TaskRunResponse> {
+export function submitTask(
+  task: string,
+  conversationId?: number | null,
+): Promise<TaskRunResponse> {
   return request<TaskRunResponse>("/tasks/", {
     method: "POST",
-    body: JSON.stringify({ task }),
+    body: JSON.stringify({ task, conversation_id: conversationId ?? null }),
   });
 }
 

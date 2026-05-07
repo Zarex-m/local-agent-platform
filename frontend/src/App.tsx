@@ -3,7 +3,6 @@ import {
   Bot,
   Check,
   Clock3,
-  Database,
   FileText,
   Globe2,
   Loader2,
@@ -21,13 +20,15 @@ import {
 import {
   approveTask,
   createTaskEventSource,
+  getConversation,
+  getConversationMessages,
   getTask,
   getTaskLogs,
   getTaskToolCalls,
-  listTasks,
+  listConversations,
   submitTask,
 } from "./api";
-import type { StepLog, Task, ToolCall } from "./types";
+import type { Conversation, ConversationMessage, StepLog, Task, ToolCall } from "./types";
 
 const statusLabels: Record<string, string> = {
   completed: "已完成",
@@ -99,16 +100,22 @@ function isTerminalStatus(status?: string | null) {
 }
 
 export default function App() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [logs, setLogs] = useState<StepLog[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
+  const [conversationId, setConversationId] = useState<number | null>(null);
   const [taskText, setTaskText] = useState("查询上海当前时间");
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatViewportRef = useRef<HTMLDivElement | null>(null);
+  const messageEndRef = useRef<HTMLDivElement | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function closeTaskStream() {
@@ -129,6 +136,7 @@ export default function App() {
         getTaskToolCalls(taskId),
       ]);
       setSelectedTask(detail);
+      setConversationId(detail.conversation_id ?? null);
       setLogs(nextLogs);
       setToolCalls(nextToolCalls);
 
@@ -149,6 +157,18 @@ export default function App() {
     }
   }
 
+  async function refreshConversationList() {
+    const nextConversations = await listConversations();
+    setConversations(nextConversations);
+    return nextConversations;
+  }
+
+  async function refreshConversationMessages(targetConversationId: number) {
+    const nextMessages = await getConversationMessages(targetConversationId);
+    setMessages(nextMessages);
+    return nextMessages;
+  }
+
   function startTaskStream(taskId: number) {
     closeTaskStream();
 
@@ -159,7 +179,7 @@ export default function App() {
       if (eventSourceRef.current !== source) return;
 
       void refreshTaskSnapshot(taskId, { silent: true });
-      void listTasks().then(setTasks).catch(() => undefined);
+      void refreshConversationList().catch(() => undefined);
     };
 
     source.addEventListener("task", refreshFromStream);
@@ -191,6 +211,11 @@ export default function App() {
 
     source.addEventListener("done", () => {
       refreshFromStream();
+      void refreshTaskSnapshot(taskId, { silent: true }).then((detail) => {
+        if (detail?.conversation_id) {
+          void refreshConversationMessages(detail.conversation_id).catch(() => undefined);
+        }
+      });
       if (eventSourceRef.current === source) {
         closeTaskStream();
       }
@@ -203,31 +228,71 @@ export default function App() {
     };
   }
 
-  async function refreshTasks(selectTaskId?: number) {
+  async function selectConversation(targetConversationId: number, options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setIsLoading(true);
+    }
+    setError(null);
+
+    try {
+      const [conversation, nextMessages] = await Promise.all([
+        getConversation(targetConversationId),
+        getConversationMessages(targetConversationId),
+      ]);
+
+      setSelectedConversation(conversation);
+      setConversationId(conversation.id);
+      setMessages(nextMessages);
+      setShowTrace(false);
+
+      if (conversation.latest_task_id) {
+        const detail = await refreshTaskSnapshot(conversation.latest_task_id, { silent: true });
+
+        if (detail && !isTerminalStatus(detail.status)) {
+          startTaskStream(detail.id);
+        } else {
+          closeTaskStream();
+        }
+      } else {
+        closeTaskStream();
+        setSelectedTask(null);
+        setLogs([]);
+        setToolCalls([]);
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        setError(err instanceof Error ? err.message : "请求失败");
+      }
+    } finally {
+      if (!options?.silent) {
+        setIsLoading(false);
+      }
+    }
+  }
+
+  async function refreshConversations(selectConversationId?: number) {
     setIsLoading(true);
     setError(null);
 
     try {
-      const nextTasks = await listTasks();
-      setTasks(nextTasks);
+      const nextConversations = await refreshConversationList();
 
       const nextSelected =
-        nextTasks.find((task) => task.id === selectTaskId) ??
-        (selectedTask ? nextTasks.find((task) => task.id === selectedTask.id) : undefined) ??
-        nextTasks[0] ??
+        nextConversations.find((conversation) => conversation.id === selectConversationId) ??
+        (conversationId
+          ? nextConversations.find((conversation) => conversation.id === conversationId)
+          : undefined) ??
+        nextConversations[0] ??
         null;
 
       if (nextSelected) {
-        const [detail, nextLogs, nextToolCalls] = await Promise.all([
-          getTask(nextSelected.id),
-          getTaskLogs(nextSelected.id),
-          getTaskToolCalls(nextSelected.id),
-        ]);
-        setSelectedTask(detail);
-        setLogs(nextLogs);
-        setToolCalls(nextToolCalls);
+        await selectConversation(nextSelected.id, { silent: true });
       } else {
+        closeTaskStream();
+        setSelectedConversation(null);
         setSelectedTask(null);
+        setConversationId(null);
+        setMessages([]);
         setLogs([]);
         setToolCalls([]);
       }
@@ -235,17 +300,6 @@ export default function App() {
       setError(err instanceof Error ? err.message : "请求失败");
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  async function selectTask(taskId: number) {
-    const detail = await refreshTaskSnapshot(taskId);
-    if (!detail) return;
-
-    if (isTerminalStatus(detail.status)) {
-      closeTaskStream();
-    } else {
-      startTaskStream(taskId);
     }
   }
 
@@ -258,9 +312,12 @@ export default function App() {
     setError(null);
 
     try {
-      const payload = await submitTask(text);
+      const payload = await submitTask(text, conversationId);
+      const nextConversationId = payload.conversation_id ?? conversationId;
+      setConversationId(nextConversationId ?? null);
       setTaskText("");
-      await refreshTasks(payload.task_id);
+      setShowTrace(false);
+      await refreshConversations(nextConversationId ?? undefined);
       startTaskStream(payload.task_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "任务提交失败");
@@ -277,7 +334,11 @@ export default function App() {
 
     try {
       const payload = await approveTask(selectedTask.id, approved);
-      await refreshTasks(payload.task_id);
+      await refreshTaskSnapshot(payload.task_id);
+      if (conversationId) {
+        await refreshConversationMessages(conversationId);
+        await refreshConversationList();
+      }
       startTaskStream(payload.task_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "审批失败");
@@ -287,7 +348,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    void refreshTasks();
+    void refreshConversations();
 
     return () => {
       closeTaskStream();
@@ -298,17 +359,72 @@ export default function App() {
     const input = taskInputRef.current;
     if (!input) return;
 
-    const maxHeight = 132;
-    const minHeight = 38;
+    const maxHeight = 92;
+    const minHeight = 28;
+
+    if (!taskText.trim()) {
+      input.style.height = `${minHeight}px`;
+      input.style.overflowY = "hidden";
+      return;
+    }
+
     input.style.height = "auto";
     const nextHeight = Math.min(Math.max(input.scrollHeight, minHeight), maxHeight);
     input.style.height = `${nextHeight}px`;
     input.style.overflowY = input.scrollHeight > maxHeight ? "auto" : "hidden";
   }, [taskText]);
 
-  const selectedStatus = selectedTask?.status ?? "created";
+  useLayoutEffect(() => {
+    if (!selectedTask && messages.length === 0) return;
+
+    requestAnimationFrame(() => {
+      messageEndRef.current?.scrollIntoView({
+        block: "end",
+        behavior: "smooth",
+      });
+
+      const viewport = chatViewportRef.current;
+      if (viewport) {
+        viewport.scrollTo({
+          top: viewport.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    });
+  }, [
+    messages.length,
+    selectedTask?.id,
+    selectedTask?.final_response,
+    selectedTask?.status,
+    logs.length,
+    toolCalls.length,
+    showTrace,
+  ]);
+
+  const activeConversation =
+    selectedConversation ??
+    (conversationId
+      ? conversations.find((conversation) => conversation.id === conversationId) ?? null
+      : null);
+  const hasActiveChat = Boolean(activeConversation || selectedTask || messages.length > 0);
+  const workspaceTitle =
+    selectedTask?.task ?? activeConversation?.title ?? activeConversation?.latest_task_title ?? "新对话";
+  const selectedStatus =
+    selectedTask?.status ?? activeConversation?.latest_task_status ?? "created";
   const needsApproval = selectedTask?.status === "pending_approval";
   const sourceLabel = toolSource(selectedTask?.selected_tool);
+  const hasPersistedAssistantForTask = Boolean(
+    selectedTask &&
+      messages.some(
+        (message) => message.role === "assistant" && message.task_id === selectedTask.id,
+      ),
+  );
+  const shouldShowLiveAssistant = Boolean(
+    selectedTask &&
+      !needsApproval &&
+      (!isTerminalStatus(selectedTask.status) ||
+        (selectedTask.final_response && !hasPersistedAssistantForTask)),
+  );
 
   const orderedLogs = useMemo(
     () => [...logs].sort((a, b) => a.id - b.id),
@@ -375,9 +491,13 @@ export default function App() {
           className="newChatButton"
           onClick={() => {
             closeTaskStream();
+            setSelectedConversation(null);
             setSelectedTask(null);
+            setMessages([]);
             setLogs([]);
             setToolCalls([]);
+            setConversationId(null);
+            setShowTrace(false);
             setTaskText("");
           }}
           type="button"
@@ -386,24 +506,32 @@ export default function App() {
           新对话
         </button>
 
-        <button className="refreshButton" onClick={() => refreshTasks()} disabled={isLoading}>
+        <button className="refreshButton" onClick={() => refreshConversations()} disabled={isLoading}>
           {isLoading ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-          刷新任务
+          刷新会话
         </button>
 
         <div className="conversationList">
-          {tasks.map((task) => (
+          {conversations.length === 0 && (
+            <div className="emptyConversationList">暂无历史会话</div>
+          )}
+          {conversations.map((conversation) => (
             <button
-              className={`conversationItem ${selectedTask?.id === task.id ? "active" : ""}`}
-              key={task.id}
-              onClick={() => selectTask(task.id)}
+              className={`conversationItem ${conversationId === conversation.id ? "active" : ""}`}
+              key={conversation.id}
+              onClick={() => selectConversation(conversation.id)}
               type="button"
             >
-              <span className={`dot ${statusTone(task.status)}`} />
+              <span className={`dot ${statusTone(conversation.latest_task_status ?? "created")}`} />
               <span className="conversationCopy">
-                <strong>{task.task}</strong>
+                <strong>{conversation.title ?? conversation.latest_task_title ?? "新会话"}</strong>
                 <small>
-                  #{task.id} · {statusLabels[task.status] ?? task.status}
+                  #{conversation.id} ·{" "}
+                  {conversation.latest_task_status
+                    ? statusLabels[conversation.latest_task_status] ??
+                      conversation.latest_task_status
+                    : "会话"}{" "}
+                  · {formatTime(conversation.updated_at)}
                 </small>
               </span>
             </button>
@@ -411,12 +539,12 @@ export default function App() {
         </div>
       </aside>
 
-      <section className={`chatWorkspace ${selectedTask ? "" : "startMode"}`}>
-        {selectedTask && (
+      <section className={`chatWorkspace ${hasActiveChat ? "" : "startMode"}`}>
+        {hasActiveChat && (
           <header className="chatHeader">
             <div>
               <p className="eyebrow">Workspace</p>
-              <h2>{selectedTask.task}</h2>
+              <h2>{workspaceTitle}</h2>
             </div>
             <div className="headerBadges">
               <span className={`statusPill ${statusTone(selectedStatus)}`}>
@@ -432,8 +560,8 @@ export default function App() {
 
         {error && <div className="errorBanner">{error}</div>}
 
-        <div className="chatViewport">
-          {!selectedTask && (
+        <div className="chatViewport" ref={chatViewportRef}>
+          {!hasActiveChat && (
             <div className="startScreen">
               <h2>我们先从哪里开始呢？</h2>
               {renderComposer("chatComposer startComposer")}
@@ -463,123 +591,30 @@ export default function App() {
             </div>
           )}
 
-          {selectedTask && (
+          {hasActiveChat && (
             <div className="messageStack">
-              <article className="messageRow user">
-                <div className="avatar userAvatar">
-                  <User size={18} />
-                </div>
-                <div className="messageBubble userBubble">
-                  <p>{selectedTask.task}</p>
-                  <span>{formatTime(selectedTask.created_at)}</span>
-                </div>
-              </article>
+              {messages.map((message) => {
+                const isUserMessage = message.role === "user";
 
-              <article className="messageRow assistant">
-                <div className="avatar botAvatar">
-                  <Bot size={18} />
-                </div>
-                <div className="messageBubble assistantBubble">
-                  <div className="toolSummary">
-                    <span>
-                      <Wrench size={15} />
-                      {selectedTask.selected_tool ?? "等待选择工具"}
-                    </span>
-                    <span>
-                      <Database size={15} />
-                      {sourceLabel}
-                    </span>
-                    <span>
-                      <Clock3 size={15} />
-                      {formatTime(selectedTask.updated_at)}
-                    </span>
-                  </div>
-                </div>
-              </article>
-
-              <article className="messageRow assistant">
-                <div className="avatar toolCallAvatar">
-                  <Wrench size={17} />
-                </div>
-                <div className="messageBubble toolCallsBubble">
-                  <div className="toolCallsHeader">
-                    <div>
-                      <strong>工具调用</strong>
-                      <span>记录 Agent 每次实际执行的工具</span>
+                return (
+                  <article
+                    className={`messageRow ${isUserMessage ? "user" : "assistant"}`}
+                    key={message.id}
+                  >
+                    <div className={`avatar ${isUserMessage ? "userAvatar" : "botAvatar"}`}>
+                      {isUserMessage ? <User size={18} /> : <Bot size={18} />}
                     </div>
-                    <b>{orderedToolCalls.length} 次</b>
-                  </div>
-
-                  {orderedToolCalls.length === 0 ? (
-                    <p className="emptyToolCalls">暂无工具调用记录。</p>
-                  ) : (
-                    <div className="toolCallList">
-                      {orderedToolCalls.map((toolCall, index) => (
-                        <section className="toolCallCard" key={toolCall.id}>
-                          <div className="toolCallTop">
-                            <div className="toolCallTitle">
-                              <strong>{toolCall.tool_name}</strong>
-                              <span>
-                                Step {toolCall.step_index ?? "-"} ·{" "}
-                                {toolCall.step_description ?? "未记录步骤"}
-                              </span>
-                            </div>
-                            <div className="toolCallBadges">
-                              <span className={`riskBadge ${riskTone(toolCall.risk_level)}`}>
-                                {toolCall.risk_level ?? "unknown"}
-                              </span>
-                              <span
-                                className={`callResult ${
-                                  toolCall.success === true
-                                    ? "ok"
-                                    : toolCall.success === false
-                                      ? "bad"
-                                      : "unknown"
-                                }`}
-                              >
-                                {toolCall.success === true
-                                  ? "成功"
-                                  : toolCall.success === false
-                                    ? "失败"
-                                    : "未知"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="toolPayloadGrid">
-                            <details open={index === orderedToolCalls.length - 1}>
-                              <summary>输入</summary>
-                              <pre>{compactMessage(formatJsonValue(toolCall.tool_input))}</pre>
-                            </details>
-                            <details>
-                              <summary>输出</summary>
-                              <pre>{compactMessage(formatJsonValue(toolCall.tool_output))}</pre>
-                            </details>
-                          </div>
-                        </section>
-                      ))}
+                    <div
+                      className={`messageBubble ${
+                        isUserMessage ? "userBubble" : "assistantBubble final"
+                      }`}
+                    >
+                      {isUserMessage ? <p>{message.content}</p> : <pre>{message.content}</pre>}
+                      {isUserMessage && <span>{formatTime(message.created_at)}</span>}
                     </div>
-                  )}
-                </div>
-              </article>
-
-              {orderedLogs.map((log) => (
-                <article className="messageRow trace" key={log.id}>
-                  <div className="avatar traceAvatar">
-                    <Clock3 size={17} />
-                  </div>
-                  <div className="messageBubble traceBubble">
-                    <div className="traceHead">
-                      <strong>{log.node}</strong>
-                      <span className={`miniStatus ${statusTone(log.status)}`}>
-                        {statusLabels[log.status] ?? log.status}
-                      </span>
-                    </div>
-                    <pre>{compactMessage(log.message)}</pre>
-                    <small>{formatTime(log.created_at)}</small>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
 
               {needsApproval && (
                 <article className="messageRow assistant">
@@ -617,21 +652,145 @@ export default function App() {
                 </article>
               )}
 
-              {!needsApproval && (
+              {shouldShowLiveAssistant && (
                 <article className="messageRow assistant">
                   <div className="avatar botAvatar">
                     <Bot size={18} />
                   </div>
                   <div className="messageBubble assistantBubble final">
-                    <pre>{selectedTask.final_response ?? "任务还没有生成最终回复。"}</pre>
+                    <pre>
+                      {selectedTask?.final_response ??
+                        (selectedTask && isTerminalStatus(selectedTask.status)
+                          ? "任务还没有生成最终回复。"
+                          : "正在生成回复...")}
+                    </pre>
                   </div>
                 </article>
               )}
+
+              {selectedTask && (
+                <article className="traceToggleRow">
+                  <button
+                    className="traceToggleButton"
+                    onClick={() => setShowTrace((value) => !value)}
+                    type="button"
+                  >
+                    <Clock3 size={16} />
+                    {showTrace ? "隐藏执行过程" : "查看执行过程"}
+                    <span>
+                      {orderedLogs.length} 条日志 · {orderedToolCalls.length} 次工具调用
+                    </span>
+                  </button>
+                </article>
+              )}
+
+              {showTrace && selectedTask && (
+                <article className="messageRow assistant tracePanelRow">
+                  <div className="avatar toolCallAvatar">
+                    <Wrench size={17} />
+                  </div>
+                  <div className="messageBubble toolCallsBubble">
+                    <div className="toolCallsHeader">
+                      <div>
+                        <strong>执行过程</strong>
+                        <span>
+                          {selectedTask.selected_tool ?? "等待选择工具"} · {sourceLabel} ·{" "}
+                          {formatTime(selectedTask.updated_at)}
+                        </span>
+                      </div>
+                      <b>{statusLabels[selectedStatus] ?? selectedStatus}</b>
+                    </div>
+
+                    <div className="traceSection">
+                      <div className="traceSectionTitle">
+                        <Wrench size={14} />
+                        工具调用
+                      </div>
+                      {orderedToolCalls.length === 0 ? (
+                        <p className="emptyToolCalls">暂无工具调用记录。</p>
+                      ) : (
+                        <div className="toolCallList">
+                          {orderedToolCalls.map((toolCall, index) => (
+                            <section className="toolCallCard" key={toolCall.id}>
+                              <div className="toolCallTop">
+                                <div className="toolCallTitle">
+                                  <strong>{toolCall.tool_name}</strong>
+                                  <span>
+                                    Step {toolCall.step_index ?? "-"} ·{" "}
+                                    {toolCall.step_description ?? "未记录步骤"}
+                                  </span>
+                                </div>
+                                <div className="toolCallBadges">
+                                  <span className={`riskBadge ${riskTone(toolCall.risk_level)}`}>
+                                    {toolCall.risk_level ?? "unknown"}
+                                  </span>
+                                  <span
+                                    className={`callResult ${
+                                      toolCall.success === true
+                                        ? "ok"
+                                        : toolCall.success === false
+                                          ? "bad"
+                                          : "unknown"
+                                    }`}
+                                  >
+                                    {toolCall.success === true
+                                      ? "成功"
+                                      : toolCall.success === false
+                                        ? "失败"
+                                        : "未知"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="toolPayloadGrid">
+                                <details open={index === orderedToolCalls.length - 1}>
+                                  <summary>输入</summary>
+                                  <pre>{compactMessage(formatJsonValue(toolCall.tool_input))}</pre>
+                                </details>
+                                <details>
+                                  <summary>输出</summary>
+                                  <pre>{compactMessage(formatJsonValue(toolCall.tool_output))}</pre>
+                                </details>
+                              </div>
+                            </section>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="traceSection">
+                      <div className="traceSectionTitle">
+                        <Clock3 size={14} />
+                        执行日志
+                      </div>
+                      {orderedLogs.length === 0 ? (
+                        <p className="emptyToolCalls">暂无日志。</p>
+                      ) : (
+                        <div className="traceLogList">
+                          {orderedLogs.map((log) => (
+                            <section className="traceLogCard" key={log.id}>
+                              <div className="traceHead">
+                                <strong>{log.node}</strong>
+                                <span className={`miniStatus ${statusTone(log.status)}`}>
+                                  {statusLabels[log.status] ?? log.status}
+                                </span>
+                              </div>
+                              <pre>{compactMessage(log.message)}</pre>
+                              <small>{formatTime(log.created_at)}</small>
+                            </section>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )}
+              <div className="messageEnd" ref={messageEndRef} />
             </div>
           )}
         </div>
 
-        {selectedTask && renderComposer("chatComposer dockComposer")}
+        {hasActiveChat && renderComposer("chatComposer dockComposer")}
       </section>
     </main>
   );

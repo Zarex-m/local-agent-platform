@@ -32,3 +32,7 @@ class AgentState(TypedDict,total=False):
     #多步计划
     plan_steps: list[dict]
     current_step:dict
+    
+    #memory
+    conversation_id: int | None
+    conversation_context: str

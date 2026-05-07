@@ -13,6 +13,7 @@ export type TaskStatus =
 
 export interface Task {
   id: number;
+  conversation_id: number | null;
   thread_id: string;
   task: string;
   status: TaskStatus;
@@ -61,5 +62,26 @@ export interface TaskRunResult {
 export interface TaskRunResponse {
   task_id: number;
   thread_id: string;
+  conversation_id?: number;
   result: TaskRunResult;
+}
+
+export interface Conversation {
+  id: number;
+  title: string | null;
+  summary: string | null;
+  created_at: string;
+  updated_at: string;
+  latest_task_id: number | null;
+  latest_task_title: string | null;
+  latest_task_status: TaskStatus | null;
+}
+
+export interface ConversationMessage {
+  id: number;
+  conversation_id: number;
+  task_id: number | null;
+  role: string;
+  content: string;
+  created_at: string;
 }
