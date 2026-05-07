@@ -104,7 +104,8 @@ h2 {
 }
 
 .newChatButton,
-.refreshButton {
+.refreshButton,
+.toolCatalogButton {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -124,14 +125,28 @@ h2 {
 
 .refreshButton {
   margin-top: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   color: #555b64;
 }
 
 .newChatButton:hover,
 .refreshButton:hover,
+.toolCatalogButton:hover,
 .conversationItem:hover {
   background: #ffffff;
+}
+
+.toolCatalogButton {
+  margin-bottom: 14px;
+  color: #555b64;
+}
+
+.toolCatalogButton.active {
+  color: #1f2328;
+  background: #ffffff;
+  box-shadow:
+    0 8px 20px rgba(38, 45, 57, 0.08),
+    inset 0 0 0 1px #e0e5ee;
 }
 
 .conversationList {
@@ -780,7 +795,9 @@ h2 {
 }
 
 .riskBadge,
-.callResult {
+.callResult,
+.sourceBadge,
+.enabledBadge {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -788,6 +805,11 @@ h2 {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 800;
+}
+
+.riskBadge.critical {
+  color: #ffffff;
+  background: #9f1239;
 }
 
 .riskBadge.high,
@@ -809,6 +831,21 @@ h2 {
 
 .riskBadge.unknown,
 .callResult.unknown {
+  color: #5f6368;
+  background: #eceff3;
+}
+
+.sourceBadge {
+  color: #353740;
+  background: #eef0f4;
+}
+
+.enabledBadge.on {
+  color: #0c6b4f;
+  background: #dff7ee;
+}
+
+.enabledBadge.off {
   color: #5f6368;
   background: #eceff3;
 }
@@ -859,6 +896,133 @@ h2 {
   display: inline-block;
   margin-top: 6px;
   color: #777b83;
+  font-size: 12px;
+}
+
+.toolCatalogView {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: 28px 24px 44px;
+}
+
+.toolCatalogSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.toolCatalogSummary section {
+  display: grid;
+  gap: 6px;
+  min-height: 78px;
+  padding: 13px 14px;
+  border: 1px solid #e6e7eb;
+  border-radius: 8px;
+  background: #fbfbfc;
+}
+
+.toolCatalogSummary span,
+.toolCatalogToolbar span {
+  color: #747b86;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.toolCatalogSummary strong {
+  color: #202123;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.toolCatalogToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.toolCatalogToolbar div {
+  display: grid;
+  gap: 4px;
+}
+
+.toolCatalogToolbar strong {
+  color: #202123;
+  font-size: 16px;
+}
+
+.toolCatalogEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 160px;
+  border: 1px solid #e6e7eb;
+  border-radius: 8px;
+  color: #747b86;
+  background: #fbfbfc;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.toolCatalogList {
+  display: grid;
+  gap: 10px;
+}
+
+.toolDefinitionCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e6e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.toolDefinitionTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.toolDefinitionTop > div:first-child {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.toolDefinitionTop strong {
+  overflow-wrap: anywhere;
+  color: #202123;
+  font-size: 14px;
+}
+
+.toolDefinitionTop span {
+  color: #69707a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.toolDefinitionCard details {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfbfc;
+}
+
+.toolDefinitionCard summary {
+  padding: 8px 10px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.toolDefinitionCard pre {
+  max-height: 240px;
+  padding: 0 10px 10px;
   font-size: 12px;
 }
 
@@ -1124,6 +1288,16 @@ pre {
   .agentTimeline {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .toolCatalogSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolDefinitionTop,
+  .toolCatalogToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1166,5 +1340,9 @@ pre {
 
   .agentTimeline {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolCatalogView {
+    padding: 18px 14px 32px;
   }
 }

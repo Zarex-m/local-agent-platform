@@ -55,3 +55,11 @@ class MessageResponse(BaseModel):
 class ConversationUpdateRequest(BaseModel):
     title: str | None = None
     summary: str | None = None
+
+class ToolDefinitionResponse(BaseModel):
+    name: str
+    source: str
+    description: str
+    input_schema: dict
+    risk_level: str
+    enabled: bool

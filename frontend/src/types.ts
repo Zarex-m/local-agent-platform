@@ -49,6 +49,15 @@ export interface ToolCall {
   created_at: string;
 }
 
+export interface ToolDefinition {
+  name: string;
+  source: "local" | "mcp" | string;
+  description: string;
+  input_schema: unknown;
+  risk_level: string;
+  enabled: boolean;
+}
+
 export interface TaskRunResult {
   status?: TaskStatus;
   selected_tool?: string;

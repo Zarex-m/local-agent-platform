@@ -30,10 +30,18 @@ import {
   getTaskLogs,
   getTaskToolCalls,
   listConversations,
+  listTools,
   submitTask,
   updateConversation,
 } from "./api";
-import type { Conversation, ConversationMessage, StepLog, Task, ToolCall } from "./types";
+import type {
+  Conversation,
+  ConversationMessage,
+  StepLog,
+  Task,
+  ToolCall,
+  ToolDefinition,
+} from "./types";
 
 const statusLabels: Record<string, string> = {
   completed: "已完成",
@@ -95,6 +103,7 @@ function formatJsonValue(value: unknown) {
 }
 
 function riskTone(risk?: string | null) {
+  if (risk === "critical") return "critical";
   if (risk === "high") return "high";
   if (risk === "medium") return "medium";
   if (risk === "low") return "low";
@@ -164,12 +173,14 @@ function getTimelineStateLabel(state: TimelineState) {
 }
 
 export default function App() {
+  const [workspaceView, setWorkspaceView] = useState<"chat" | "tools">("chat");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [logs, setLogs] = useState<StepLog[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
+  const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [taskText, setTaskText] = useState("查询上海当前时间");
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -180,6 +191,7 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -190,6 +202,7 @@ export default function App() {
 
   function resetConversationView() {
     closeTaskStream();
+    setWorkspaceView("chat");
     setSelectedConversation(null);
     setSelectedTask(null);
     setMessages([]);
@@ -237,6 +250,28 @@ export default function App() {
     const nextConversations = await listConversations();
     setConversations(nextConversations);
     return nextConversations;
+  }
+
+  async function refreshToolCatalog() {
+    setIsLoadingTools(true);
+    setError(null);
+
+    try {
+      const nextTools = await listTools();
+      setTools(nextTools);
+      return nextTools;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "工具列表加载失败");
+      return [];
+    } finally {
+      setIsLoadingTools(false);
+    }
+  }
+
+  function openToolCatalog() {
+    setWorkspaceView("tools");
+    setShowTrace(false);
+    void refreshToolCatalog();
   }
 
   async function refreshConversationMessages(targetConversationId: number) {
@@ -305,6 +340,8 @@ export default function App() {
   }
 
   async function selectConversation(targetConversationId: number, options?: { silent?: boolean }) {
+    setWorkspaceView("chat");
+
     if (!options?.silent) {
       setIsLoading(true);
     }
@@ -555,6 +592,7 @@ export default function App() {
       ? conversations.find((conversation) => conversation.id === conversationId) ?? null
       : null);
   const hasActiveChat = Boolean(activeConversation || selectedTask || messages.length > 0);
+  const isToolCatalogView = workspaceView === "tools";
   const workspaceTitle =
     activeConversation?.title ?? selectedTask?.task ?? activeConversation?.latest_task_title ?? "新对话";
   const selectedStatus =
@@ -584,6 +622,23 @@ export default function App() {
     () => [...toolCalls].sort((a, b) => a.id - b.id),
     [toolCalls],
   );
+
+  const toolStats = useMemo(() => {
+    return tools.reduce(
+      (stats, tool) => {
+        stats.total += 1;
+        if (tool.source === "mcp") stats.mcp += 1;
+        else stats.local += 1;
+
+        if (tool.risk_level === "high" || tool.risk_level === "critical") {
+          stats.elevated += 1;
+        }
+
+        return stats;
+      },
+      { total: 0, local: 0, mcp: 0, elevated: 0 },
+    );
+  }, [tools]);
 
   const timelineSteps = useMemo(() => {
     const latestLog = orderedLogs[orderedLogs.length - 1];
@@ -706,6 +761,77 @@ export default function App() {
     );
   }
 
+  function renderToolCatalog() {
+    return (
+      <div className="toolCatalogView">
+        <div className="toolCatalogSummary">
+          <section>
+            <span>总数</span>
+            <strong>{toolStats.total}</strong>
+          </section>
+          <section>
+            <span>本地工具</span>
+            <strong>{toolStats.local}</strong>
+          </section>
+          <section>
+            <span>MCP 工具</span>
+            <strong>{toolStats.mcp}</strong>
+          </section>
+          <section>
+            <span>高风险</span>
+            <strong>{toolStats.elevated}</strong>
+          </section>
+        </div>
+
+        <div className="toolCatalogToolbar">
+          <div>
+            <strong>工具目录</strong>
+            <span>展示本地工具、MCP 工具、风险等级和参数 schema。</span>
+          </div>
+          <button className="secondaryButton" onClick={refreshToolCatalog} disabled={isLoadingTools}>
+            {isLoadingTools ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+            刷新
+          </button>
+        </div>
+
+        {isLoadingTools && tools.length === 0 ? (
+          <div className="toolCatalogEmpty">
+            <Loader2 className="spin" size={18} />
+            正在加载工具
+          </div>
+        ) : tools.length === 0 ? (
+          <div className="toolCatalogEmpty">暂无工具。后端接入 /tools 后会显示在这里。</div>
+        ) : (
+          <div className="toolCatalogList">
+            {tools.map((tool) => (
+              <section className="toolDefinitionCard" key={tool.name}>
+                <div className="toolDefinitionTop">
+                  <div>
+                    <strong>{tool.name}</strong>
+                    <span>{tool.description || "暂无描述"}</span>
+                  </div>
+                  <div className="toolCallBadges">
+                    <span className="sourceBadge">{tool.source === "mcp" ? "MCP" : "本地"}</span>
+                    <span className={`riskBadge ${riskTone(tool.risk_level)}`}>
+                      {tool.risk_level || "unknown"}
+                    </span>
+                    <span className={`enabledBadge ${tool.enabled ? "on" : "off"}`}>
+                      {tool.enabled ? "启用" : "停用"}
+                    </span>
+                  </div>
+                </div>
+                <details>
+                  <summary>参数</summary>
+                  <pre>{formatJsonValue(tool.input_schema)}</pre>
+                </details>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <main className="chatShell">
       <aside className="chatSidebar">
@@ -734,6 +860,15 @@ export default function App() {
         <button className="refreshButton" onClick={() => refreshConversations()} disabled={isLoading}>
           {isLoading ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
           刷新会话
+        </button>
+
+        <button
+          className={`toolCatalogButton ${workspaceView === "tools" ? "active" : ""}`}
+          onClick={openToolCatalog}
+          type="button"
+        >
+          <Wrench size={16} />
+          工具
         </button>
 
         <div className="conversationList">
@@ -787,8 +922,27 @@ export default function App() {
         </div>
       </aside>
 
-      <section className={`chatWorkspace ${hasActiveChat ? "" : "startMode"}`}>
-        {hasActiveChat && (
+      <section
+        className={`chatWorkspace ${
+          workspaceView === "chat" && !hasActiveChat ? "startMode" : ""
+        }`}
+      >
+        {isToolCatalogView && (
+          <header className="chatHeader">
+            <div>
+              <p className="eyebrow">Tools</p>
+              <h2>工具管理</h2>
+            </div>
+            <div className="headerBadges">
+              <span className="sourcePill">
+                <Wrench size={14} />
+                {toolStats.total} 个工具
+              </span>
+            </div>
+          </header>
+        )}
+
+        {workspaceView === "chat" && hasActiveChat && (
           <header className="chatHeader">
             <div>
               <p className="eyebrow">Workspace</p>
@@ -825,7 +979,9 @@ export default function App() {
         {error && <div className="errorBanner">{error}</div>}
 
         <div className="chatViewport" ref={chatViewportRef}>
-          {!hasActiveChat && (
+          {isToolCatalogView && renderToolCatalog()}
+
+          {workspaceView === "chat" && !hasActiveChat && (
             <div className="startScreen">
               <h2>我们先从哪里开始呢？</h2>
               {renderComposer("chatComposer startComposer")}
@@ -855,7 +1011,7 @@ export default function App() {
             </div>
           )}
 
-          {hasActiveChat && (
+          {workspaceView === "chat" && hasActiveChat && (
             <div className="messageStack">
               {messages.map((message) => {
                 const isUserMessage = message.role === "user";
@@ -1084,7 +1240,7 @@ export default function App() {
           )}
         </div>
 
-        {hasActiveChat && renderComposer("chatComposer dockComposer")}
+        {workspaceView === "chat" && hasActiveChat && renderComposer("chatComposer dockComposer")}
       </section>
     </main>
   );
