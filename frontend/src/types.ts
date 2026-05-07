@@ -1,5 +1,6 @@
 export type TaskStatus =
   | "created"
+  | "running"
   | "planned"
   | "tool_selected"
   | "approved"

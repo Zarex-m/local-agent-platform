@@ -119,7 +119,7 @@ def save_tool_calls(task_id: int, tool_history: list[dict]) -> None:
     db = SessionLocal()
 
     try:
-        db.excute(delete(ToolCall).where(ToolCall.task_id == task_id))
+        db.execute(delete(ToolCall).where(ToolCall.task_id == task_id))
         for item in tool_history:
             step = item.get("step", {})
             tool_output = item.get("tool_output", {})

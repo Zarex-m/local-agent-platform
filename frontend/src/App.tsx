@@ -18,7 +18,15 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { approveTask, getTask, getTaskLogs, getTaskToolCalls, listTasks, submitTask } from "./api";
+import {
+  approveTask,
+  createTaskEventSource,
+  getTask,
+  getTaskLogs,
+  getTaskToolCalls,
+  listTasks,
+  submitTask,
+} from "./api";
 import type { StepLog, Task, ToolCall } from "./types";
 
 const statusLabels: Record<string, string> = {
@@ -26,6 +34,7 @@ const statusLabels: Record<string, string> = {
   pending_approval: "待审批",
   failed: "失败",
   rejected: "已拒绝",
+  running: "运行中",
   tool_selected: "已选工具",
   tool_executed: "已执行",
   approved: "已批准",
@@ -84,6 +93,10 @@ function riskTone(risk?: string | null) {
   return "unknown";
 }
 
+function isTerminalStatus(status?: string | null) {
+  return status === "completed" || status === "failed" || status === "rejected";
+}
+
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -91,10 +104,80 @@ export default function App() {
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
   const [taskText, setTaskText] = useState("查询上海当前时间");
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function closeTaskStream() {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+  }
+
+  async function refreshTaskSnapshot(taskId: number, options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setIsLoading(true);
+    }
+    setError(null);
+
+    try {
+      const [detail, nextLogs, nextToolCalls] = await Promise.all([
+        getTask(taskId),
+        getTaskLogs(taskId),
+        getTaskToolCalls(taskId),
+      ]);
+      setSelectedTask(detail);
+      setLogs(nextLogs);
+      setToolCalls(nextToolCalls);
+
+      if (isTerminalStatus(detail.status)) {
+        closeTaskStream();
+      }
+
+      return detail;
+    } catch (err) {
+      if (!options?.silent) {
+        setError(err instanceof Error ? err.message : "请求失败");
+      }
+      return null;
+    } finally {
+      if (!options?.silent) {
+        setIsLoading(false);
+      }
+    }
+  }
+
+  function startTaskStream(taskId: number) {
+    closeTaskStream();
+
+    const source = createTaskEventSource(taskId);
+    eventSourceRef.current = source;
+
+    const refreshFromStream = () => {
+      if (eventSourceRef.current !== source) return;
+
+      void refreshTaskSnapshot(taskId, { silent: true });
+      void listTasks().then(setTasks).catch(() => undefined);
+    };
+
+    source.addEventListener("task", refreshFromStream);
+    source.addEventListener("log", refreshFromStream);
+    source.addEventListener("tool_call", refreshFromStream);
+
+    source.addEventListener("done", () => {
+      refreshFromStream();
+      if (eventSourceRef.current === source) {
+        closeTaskStream();
+      }
+    });
+
+    source.onerror = () => {
+      if (eventSourceRef.current === source) {
+        closeTaskStream();
+      }
+    };
+  }
 
   async function refreshTasks(selectTaskId?: number) {
     setIsLoading(true);
@@ -132,22 +215,13 @@ export default function App() {
   }
 
   async function selectTask(taskId: number) {
-    setIsLoading(true);
-    setError(null);
+    const detail = await refreshTaskSnapshot(taskId);
+    if (!detail) return;
 
-    try {
-      const [detail, nextLogs, nextToolCalls] = await Promise.all([
-        getTask(taskId),
-        getTaskLogs(taskId),
-        getTaskToolCalls(taskId),
-      ]);
-      setSelectedTask(detail);
-      setLogs(nextLogs);
-      setToolCalls(nextToolCalls);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "请求失败");
-    } finally {
-      setIsLoading(false);
+    if (isTerminalStatus(detail.status)) {
+      closeTaskStream();
+    } else {
+      startTaskStream(taskId);
     }
   }
 
@@ -163,6 +237,7 @@ export default function App() {
       const payload = await submitTask(text);
       setTaskText("");
       await refreshTasks(payload.task_id);
+      startTaskStream(payload.task_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "任务提交失败");
     } finally {
@@ -179,6 +254,7 @@ export default function App() {
     try {
       const payload = await approveTask(selectedTask.id, approved);
       await refreshTasks(payload.task_id);
+      startTaskStream(payload.task_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "审批失败");
     } finally {
@@ -188,6 +264,10 @@ export default function App() {
 
   useEffect(() => {
     void refreshTasks();
+
+    return () => {
+      closeTaskStream();
+    };
   }, []);
 
   useLayoutEffect(() => {
@@ -270,6 +350,7 @@ export default function App() {
         <button
           className="newChatButton"
           onClick={() => {
+            closeTaskStream();
             setSelectedTask(null);
             setLogs([]);
             setToolCalls([]);

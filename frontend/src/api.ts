@@ -1,6 +1,6 @@
 import type { StepLog, Task, TaskRunResponse, ToolCall } from "./types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -33,6 +33,10 @@ export function getTaskLogs(taskId: number): Promise<StepLog[]> {
 
 export function getTaskToolCalls(taskId: number): Promise<ToolCall[]> {
   return request<ToolCall[]>(`/tasks/${taskId}/tool-calls`);
+}
+
+export function createTaskEventSource(taskId: number): EventSource {
+  return new EventSource(`${API_BASE_URL}/tasks/${taskId}/events`);
 }
 
 export function submitTask(task: string): Promise<TaskRunResponse> {
