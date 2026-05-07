@@ -19,6 +19,9 @@ class AgentState(TypedDict,total=False):
     approved: bool
     approval_required: bool
     approval_reason: str | None
+    risk_level: str
+    risk_reasons: list[str]
+    matched_risk_rules: list[str]
     
     # 多步循环相关
     iterations: int

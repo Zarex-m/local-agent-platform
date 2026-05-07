@@ -5,6 +5,7 @@ from app.agent.llm import invoke_llm, invoke_llm_json, invoke_llm_stream
 from app.storage import task_repository as task_repo
 from app.tools.registry import TOOL_REGISTRY, get_tools_text
 from langgraph.types import interrupt
+from app.tools.safety import analyze_tool_risk, format_risk_reason
 
 LOG_STARTED = "started"
 LOG_SUCCESS = "success"
@@ -297,23 +298,37 @@ def check_approval(state: AgentState) -> dict:
     如果工具风险较高，暂停等待用户审批
     """
     append_runtime_log(state, "check_approval", LOG_STARTED, "正在检查工具风险")
-    tool_name = state.get("selected_tool", "mock_tool")
-    tool_info = TOOL_REGISTRY.get(tool_name, {})
-    risk_level = tool_info.get("risk_level", "low")
 
-    if risk_level == "high":
+    tool_name = state.get("selected_tool", "mock_tool")
+    tool_input = state.get("tool_input", {})
+    tool_info = TOOL_REGISTRY.get(tool_name, {})
+    default_risk_level = tool_info.get("risk_level", "low")
+
+    risk = analyze_tool_risk(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        default_risk_level=default_risk_level,
+    )
+    risk_level = risk.get("risk_level", default_risk_level)
+    risk_reasons = risk.get("risk_reasons", [])
+    matched_rules = risk.get("matched_rules", [])
+    approval_reason = format_risk_reason(tool_name, tool_input, risk)
+
+    if risk.get("requires_approval"):
         append_runtime_log(
             state,
             "check_approval",
             LOG_WAITING_APPROVAL,
-            f"工具 {tool_name} 风险等级为 high，等待用户审批",
+            approval_reason,
         )
         decision = interrupt(
             {
                 "tool_name": tool_name,
-                "tool_input": state.get("tool_input", {}),
+                "tool_input": tool_input,
                 "risk_level": risk_level,
-                "reason": f"工具 {tool_name} 风险等级为 high，需要用户审批",
+                "risk_reasons": risk_reasons,
+                "matched_rules": matched_rules,
+                "reason": approval_reason,
             }
         )
         if decision.get("approved"):
@@ -321,11 +336,14 @@ def check_approval(state: AgentState) -> dict:
                 "approved": True,
                 "approval_required": False,
                 "approval_reason": None,
+                "risk_level": risk_level,
+                "risk_reasons": risk_reasons,
+                "matched_risk_rules": matched_rules,
                 "status": "approved",
                 "step_logs": [
                     {
                         "node": "check_approval",
-                        "message": f"用户批准执行高风险工具 {tool_name}",
+                        "message": f"用户批准执行工具 {tool_name}，风险等级：{risk_level}",
                         "status": LOG_SUCCESS,
                     }
                 ],
@@ -334,11 +352,14 @@ def check_approval(state: AgentState) -> dict:
             "approved": False,
             "approval_required": True,
             "approval_reason": "用户拒绝了高风险工具的使用",
+            "risk_level": risk_level,
+            "risk_reasons": risk_reasons,
+            "matched_risk_rules": matched_rules,
             "status": "rejected",
             "step_logs": [
                 {
                     "node": "check_approval",
-                    "message": f"用户拒绝执行高风险工具 {tool_name}",
+                    "message": f"用户拒绝执行工具 {tool_name}，风险等级：{risk_level}",
                     "status": LOG_FAILED,
                 }
             ],
@@ -348,6 +369,9 @@ def check_approval(state: AgentState) -> dict:
         "approved": True,
         "approval_required": False,
         "approval_reason": None,
+        "risk_level": risk_level,
+        "risk_reasons": risk_reasons,
+        "matched_risk_rules": matched_rules,
         "status": "approved",
         "step_logs": [
             {
@@ -400,7 +424,7 @@ def execute_tool(state: AgentState) -> dict:
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "tool_output": tool_output,
-                "risk_level": tool_info.get("risk_level"),
+                "risk_level": state.get("risk_level") or tool_info.get("risk_level"),
                 "approved": state.get("approved"),
             }
         ],

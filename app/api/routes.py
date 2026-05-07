@@ -134,7 +134,7 @@ async def stream_task_events(task_id: int):
                     last_tool_call_id = tool_call["id"]
                     yield sse_event("tool_call", tool_call)
 
-            if task.status in {"completed", "failed", "rejected"}:
+            if task.status in {"completed", "failed", "rejected", "cancelled"}:
                 yield sse_event("done", {"task_id": task_id, "status": task.status})
                 return
 

@@ -97,3 +97,16 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_task_cancel_requested_column()
+
+
+def ensure_task_cancel_requested_column() -> None:
+    with engine.begin() as connection:
+        columns = connection.exec_driver_sql("PRAGMA table_info(tasks)").fetchall()
+        column_names = {column[1] for column in columns}
+
+        if "cancel_requested" not in column_names:
+            connection.exec_driver_sql(
+                "ALTER TABLE tasks "
+                "ADD COLUMN cancel_requested BOOLEAN NOT NULL DEFAULT 0"
+            )
