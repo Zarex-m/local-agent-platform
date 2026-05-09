@@ -110,3 +110,14 @@ def ensure_task_cancel_requested_column() -> None:
                 "ALTER TABLE tasks "
                 "ADD COLUMN cancel_requested BOOLEAN NOT NULL DEFAULT 0"
             )
+
+class ToolSetting(Base):
+    __tablename__ = "tool_settings"
+
+    tool_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )

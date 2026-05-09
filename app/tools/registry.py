@@ -6,7 +6,7 @@ from app.tools.builtin import (
     run_shell,
     http_request,
 )
-
+from app.storage.tool_settings_repository import set_tool_enabled_setting, get_tool_enabled_setting
 TOOL_REGISTRY = {
     "mock_tool": {
         "name": "mock_tool",
@@ -87,7 +87,7 @@ def list_tool_definitions() -> list[dict]:
                 "description": tool.get("description", ""),
                 "input_schema": tool.get("input_schema") or {},
                 "risk_level": tool.get("risk_level", "unknown"),
-                "enabled": tool.get("enabled", True),
+                "enabled": get_tool_enabled(name, tool.get("enabled", True)),
             }
         )
 
@@ -98,7 +98,7 @@ def set_tool_enabled(tool_name: str, enabled: bool) -> dict | None:
     tool = TOOL_REGISTRY.get(tool_name)
     if tool is None:
         return None
-
+    set_tool_enabled_setting(tool_name, enabled)
     tool["enabled"] = enabled
     return {
         "name": tool.get("name", tool_name),
@@ -106,22 +106,36 @@ def set_tool_enabled(tool_name: str, enabled: bool) -> dict | None:
         "description": tool.get("description", ""),
         "input_schema": tool.get("input_schema") or {},
         "risk_level": tool.get("risk_level", "unknown"),
-        "enabled": tool.get("enabled", True),
+        "enabled": get_tool_enabled(tool_name, tool.get("enabled", True)),
     }
 
 
 def is_tool_enabled(tool_name: str) -> bool:
     tool = TOOL_REGISTRY.get(tool_name)
-    return bool(tool and tool.get("enabled", True))
+    if tool is None:
+        return False
+    return get_tool_enabled(tool_name, tool.get("enabled", True))
 
 
 def get_tools_text() -> str:
     lines = []
     for tool in TOOL_REGISTRY.values():
-        if not tool.get("enabled", True):
+        tool_name=tool["name"]
+        if not get_tool_enabled(tool_name, tool.get("enabled", True)):
             continue
 
         lines.append(
             f"- {tool['name']}：{tool['description']}，参数：{tool['input_schema']}，风险等级：{tool['risk_level']}"
         )
     return "\n".join(lines)
+
+def get_tool_enabled(tool_name:str,default:bool=True)->bool:
+    try:
+        stored_enabled=get_tool_enabled_setting(tool_name)
+    except Exception as e:
+        stored_enabled=None
+    
+    if stored_enabled is None:
+        return default
+    return stored_enabled
+        
