@@ -79,6 +79,16 @@ export function listTools(): Promise<ToolDefinition[]> {
   return request<ToolDefinition[]>("/tools/");
 }
 
+export function updateToolEnabled(
+  toolName: string,
+  enabled: boolean,
+): Promise<ToolDefinition> {
+  return request<ToolDefinition>(`/tools/${encodeURIComponent(toolName)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export function createTaskEventSource(taskId: number): EventSource {
   return new EventSource(`${API_BASE_URL}/tasks/${taskId}/events`);
 }

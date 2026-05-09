@@ -71,9 +71,56 @@ except Exception as e:
     print(f"加载 MCP 工具失败：{e}")
 
 
+def get_tool_source(tool_name: str) -> str:
+    return "mcp" if tool_name.startswith("mcp.") else "local"
+
+
+def list_tool_definitions() -> list[dict]:
+    tools = []
+
+    for tool in TOOL_REGISTRY.values():
+        name = tool.get("name", "")
+        tools.append(
+            {
+                "name": name,
+                "source": get_tool_source(name),
+                "description": tool.get("description", ""),
+                "input_schema": tool.get("input_schema") or {},
+                "risk_level": tool.get("risk_level", "unknown"),
+                "enabled": tool.get("enabled", True),
+            }
+        )
+
+    return tools
+
+
+def set_tool_enabled(tool_name: str, enabled: bool) -> dict | None:
+    tool = TOOL_REGISTRY.get(tool_name)
+    if tool is None:
+        return None
+
+    tool["enabled"] = enabled
+    return {
+        "name": tool.get("name", tool_name),
+        "source": get_tool_source(tool_name),
+        "description": tool.get("description", ""),
+        "input_schema": tool.get("input_schema") or {},
+        "risk_level": tool.get("risk_level", "unknown"),
+        "enabled": tool.get("enabled", True),
+    }
+
+
+def is_tool_enabled(tool_name: str) -> bool:
+    tool = TOOL_REGISTRY.get(tool_name)
+    return bool(tool and tool.get("enabled", True))
+
+
 def get_tools_text() -> str:
     lines = []
     for tool in TOOL_REGISTRY.values():
+        if not tool.get("enabled", True):
+            continue
+
         lines.append(
             f"- {tool['name']}：{tool['description']}，参数：{tool['input_schema']}，风险等级：{tool['risk_level']}"
         )

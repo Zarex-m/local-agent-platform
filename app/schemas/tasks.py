@@ -63,3 +63,7 @@ class ToolDefinitionResponse(BaseModel):
     input_schema: dict
     risk_level: str
     enabled: bool
+
+
+class ToolUpdateRequest(BaseModel):
+    enabled: bool

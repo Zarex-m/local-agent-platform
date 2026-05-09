@@ -3,7 +3,7 @@ import time
 from app.agent.state import AgentState
 from app.agent.llm import invoke_llm, invoke_llm_json, invoke_llm_stream
 from app.storage import task_repository as task_repo
-from app.tools.registry import TOOL_REGISTRY, get_tools_text
+from app.tools.registry import TOOL_REGISTRY, get_tools_text, is_tool_enabled
 from langgraph.types import interrupt
 from app.tools.safety import analyze_tool_risk, format_risk_reason
 
@@ -409,6 +409,24 @@ def execute_tool(state: AgentState) -> dict:
                 }
             ],
         }
+
+    if not is_tool_enabled(tool_name):
+        return {
+            "tool_output": {
+                "success": False,
+                "data": None,
+                "error": f"工具已停用：{tool_name}",
+            },
+            "status": "failed",
+            "step_logs": [
+                {
+                    "node": "execute_tool",
+                    "message": f"工具已停用，拒绝执行：{tool_name}",
+                    "status": LOG_FAILED,
+                }
+            ],
+        }
+
     handler = tool_info["handler"]
     tool_output = handler(tool_input)
 

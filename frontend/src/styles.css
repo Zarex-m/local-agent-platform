@@ -797,11 +797,13 @@ h2 {
 .riskBadge,
 .callResult,
 .sourceBadge,
-.enabledBadge {
+.enabledToggle {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   min-height: 24px;
   padding: 0 8px;
+  border: 0;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 800;
@@ -840,14 +842,18 @@ h2 {
   background: #eef0f4;
 }
 
-.enabledBadge.on {
+.enabledToggle.on {
   color: #0c6b4f;
   background: #dff7ee;
 }
 
-.enabledBadge.off {
+.enabledToggle.off {
   color: #5f6368;
   background: #eceff3;
+}
+
+.enabledToggle:hover:not(:disabled) {
+  filter: brightness(0.97);
 }
 
 .toolPayloadGrid {

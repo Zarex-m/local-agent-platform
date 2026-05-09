@@ -33,6 +33,7 @@ import {
   listTools,
   submitTask,
   updateConversation,
+  updateToolEnabled,
 } from "./api";
 import type {
   Conversation,
@@ -192,6 +193,7 @@ export default function App() {
   const [isApproving, setIsApproving] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
+  const [updatingToolName, setUpdatingToolName] = useState<string | null>(null);
   const [showTrace, setShowTrace] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -272,6 +274,22 @@ export default function App() {
     setWorkspaceView("tools");
     setShowTrace(false);
     void refreshToolCatalog();
+  }
+
+  async function handleToggleTool(tool: ToolDefinition) {
+    setUpdatingToolName(tool.name);
+    setError(null);
+
+    try {
+      const updatedTool = await updateToolEnabled(tool.name, !tool.enabled);
+      setTools((current) =>
+        current.map((item) => (item.name === updatedTool.name ? updatedTool : item)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新工具状态失败");
+    } finally {
+      setUpdatingToolName(null);
+    }
   }
 
   async function refreshConversationMessages(targetConversationId: number) {
@@ -815,9 +833,17 @@ export default function App() {
                     <span className={`riskBadge ${riskTone(tool.risk_level)}`}>
                       {tool.risk_level || "unknown"}
                     </span>
-                    <span className={`enabledBadge ${tool.enabled ? "on" : "off"}`}>
+                    <button
+                      className={`enabledToggle ${tool.enabled ? "on" : "off"}`}
+                      disabled={updatingToolName === tool.name}
+                      onClick={() => handleToggleTool(tool)}
+                      type="button"
+                    >
+                      {updatingToolName === tool.name ? (
+                        <Loader2 className="spin" size={12} />
+                      ) : null}
                       {tool.enabled ? "启用" : "停用"}
-                    </span>
+                    </button>
                   </div>
                 </div>
                 <details>
