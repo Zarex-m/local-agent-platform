@@ -1,19 +1,19 @@
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.tasks import ToolDefinitionResponse, ToolUpdateRequest
-from app.tools.registry import list_tool_definitions, set_tool_enabled
+from app.services import tool_service
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
 
 @router.get("/", response_model=list[ToolDefinitionResponse])
 async def list_tools():
-    return list_tool_definitions()
+    return tool_service.list_tools()
 
 
 @router.patch("/{tool_name}", response_model=ToolDefinitionResponse)
 async def update_tool(tool_name: str, request: ToolUpdateRequest):
-    tool = set_tool_enabled(tool_name, request.enabled)
+    tool = tool_service.update_tool_enabled(tool_name, request.enabled)
 
     if tool is None:
         raise HTTPException(status_code=404, detail="Tool not found")
