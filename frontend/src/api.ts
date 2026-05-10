@@ -6,6 +6,7 @@ import type {
   TaskRunResponse,
   ToolCall,
   ToolDefinition,
+  UploadedFile,
 } from "./types";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -96,11 +97,33 @@ export function createTaskEventSource(taskId: number): EventSource {
 export function submitTask(
   task: string,
   conversationId?: number | null,
+  attachmentPaths: string[] = [],
 ): Promise<TaskRunResponse> {
   return request<TaskRunResponse>("/tasks/", {
     method: "POST",
-    body: JSON.stringify({ task, conversation_id: conversationId ?? null }),
+    body: JSON.stringify({
+      task,
+      conversation_id: conversationId ?? null,
+      attachment_paths: attachmentPaths,
+    }),
   });
+}
+
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/files/upload`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Upload failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<UploadedFile>;
 }
 
 export function approveTask(taskId: number, approved: boolean): Promise<TaskRunResponse> {

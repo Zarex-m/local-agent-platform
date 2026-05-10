@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.conversation_routes import router as conversation_router
+from app.api.file_routes import router as file_router
 from app.api.routes import router
 from app.api.tool_routes import router as tool_router
 from app.storage.database import init_db
@@ -26,6 +27,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(conversation_router)
 app.include_router(tool_router)
+app.include_router(file_router)
 
 
 @app.get("/health")

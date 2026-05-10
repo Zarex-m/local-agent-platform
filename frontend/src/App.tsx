@@ -1,10 +1,20 @@
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot,
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
   Check,
   Clock3,
   Trash2,
   FileText,
+  FolderOpen,
   Globe2,
   Loader2,
   MessageSquarePlus,
@@ -14,7 +24,6 @@ import {
   RefreshCw,
   ShieldAlert,
   Sparkles,
-  User,
   Wrench,
   X,
   StopCircle,
@@ -34,6 +43,7 @@ import {
   submitTask,
   updateConversation,
   updateToolEnabled,
+  uploadFile,
 } from "./api";
 import type {
   Conversation,
@@ -42,6 +52,7 @@ import type {
   Task,
   ToolCall,
   ToolDefinition,
+  UploadedFile,
 } from "./types";
 
 const statusLabels: Record<string, string> = {
@@ -59,6 +70,22 @@ const statusLabels: Record<string, string> = {
   planned: "已规划",
 };
 
+const markdownPlugins = [remarkGfm];
+
+function normalizeMarkdownForDisplay(content: string) {
+  return content.replace(/```(?:markdown|md)\s*\n([\s\S]*?)```/gi, "$1").trim();
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <div className="markdownBody">
+      <ReactMarkdown remarkPlugins={markdownPlugins}>
+        {normalizeMarkdownForDisplay(content)}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 function formatTime(value?: string) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("zh-CN", {
@@ -67,6 +94,12 @@ function formatTime(value?: string) {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date(value));
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function statusTone(status: string) {
@@ -184,7 +217,9 @@ export default function App() {
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [taskText, setTaskText] = useState("查询上海当前时间");
+  const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const chatViewportRef = useRef<HTMLDivElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -192,8 +227,10 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [updatingToolName, setUpdatingToolName] = useState<string | null>(null);
+  const [showProgress, setShowProgress] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -211,7 +248,9 @@ export default function App() {
     setLogs([]);
     setToolCalls([]);
     setConversationId(null);
+    setShowProgress(false);
     setShowTrace(false);
+    setAttachments([]);
   }
 
   async function refreshTaskSnapshot(taskId: number, options?: { silent?: boolean }) {
@@ -272,6 +311,7 @@ export default function App() {
 
   function openToolCatalog() {
     setWorkspaceView("tools");
+    setShowProgress(false);
     setShowTrace(false);
     void refreshToolCatalog();
   }
@@ -374,7 +414,9 @@ export default function App() {
       setSelectedConversation(conversation);
       setConversationId(conversation.id);
       setMessages(nextMessages);
+      setShowProgress(false);
       setShowTrace(false);
+      setAttachments([]);
 
       if (conversation.latest_task_id) {
         const detail = await refreshTaskSnapshot(conversation.latest_task_id, { silent: true });
@@ -437,16 +479,19 @@ export default function App() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = taskText.trim();
-    if (!text) return;
+    if (!text || isUploading) return;
 
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const payload = await submitTask(text, conversationId);
+      const attachmentPaths = attachments.map((file) => file.path);
+      const payload = await submitTask(text, conversationId, attachmentPaths);
       const nextConversationId = payload.conversation_id ?? conversationId;
       setConversationId(nextConversationId ?? null);
       setTaskText("");
+      setAttachments([]);
+      setShowProgress(false);
       setShowTrace(false);
       await refreshConversations(nextConversationId ?? undefined);
       startTaskStream(payload.task_id);
@@ -455,6 +500,29 @@ export default function App() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (files.length === 0) return;
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const uploadedFiles = await Promise.all(files.map((file) => uploadFile(file)));
+      setAttachments((current) => [...current, ...uploadedFiles]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "文件上传失败");
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function removeAttachment(path: string) {
+    setAttachments((current) => current.filter((file) => file.path !== path));
   }
 
   async function handleApproval(approved: boolean) {
@@ -757,21 +825,46 @@ export default function App() {
           placeholder="有问题，尽管问"
           rows={1}
         />
+        <input
+          ref={fileInputRef}
+          accept=".txt,.md,.csv,.json,.pdf"
+          className="fileInput"
+          multiple
+          onChange={handleAttachmentChange}
+          type="file"
+        />
+        {attachments.length > 0 && (
+          <div className="attachmentList">
+            {attachments.map((file) => (
+              <span className="attachmentChip" key={file.path} title={file.display_path}>
+                <FileText size={14} />
+                <span>{file.filename}</span>
+                <small>{formatFileSize(file.size)}</small>
+                <button
+                  aria-label={`移除 ${file.filename}`}
+                  onClick={() => removeAttachment(file.path)}
+                  type="button"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="composerBar">
           <div className="composerTools">
-            <button className="toolButton" type="button" aria-label="添加">
-              <Plus size={18} />
-            </button>
             <button
-              className="modeButton"
+              className="toolButton"
+              disabled={isSubmitting || isUploading}
+              onClick={() => fileInputRef.current?.click()}
+              title="添加文件"
               type="button"
-              onClick={() => setTaskText("查询上海当前时间")}
+              aria-label="添加文件"
             >
-              <Sparkles size={17} />
-              进阶
+              {isUploading ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
             </button>
           </div>
-          <button className="sendButton" disabled={isSubmitting || !taskText.trim()}>
+          <button className="sendButton" disabled={isSubmitting || isUploading || !taskText.trim()}>
             {isSubmitting ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
           </button>
         </div>
@@ -804,7 +897,7 @@ export default function App() {
         <div className="toolCatalogToolbar">
           <div>
             <strong>工具目录</strong>
-            <span>展示本地工具、MCP 工具、风险等级和参数 schema。</span>
+            <span>管理本地工具和 MCP 工具的启用状态与风险等级。</span>
           </div>
           <button className="secondaryButton" onClick={refreshToolCatalog} disabled={isLoadingTools}>
             {isLoadingTools ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
@@ -846,10 +939,6 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <details>
-                  <summary>参数</summary>
-                  <pre>{formatJsonValue(tool.input_schema)}</pre>
-                </details>
               </section>
             ))}
           </div>
@@ -978,10 +1067,6 @@ export default function App() {
               <span className={`statusPill ${statusTone(selectedStatus)}`}>
                 {statusLabels[selectedStatus] ?? selectedStatus}
               </span>
-              <span className="sourcePill">
-                <Wrench size={14} />
-                {sourceLabel}
-              </span>
               {canCancelTask && (
                 <button
                   className="cancelTaskButton"
@@ -1012,26 +1097,40 @@ export default function App() {
               <h2>我们先从哪里开始呢？</h2>
               {renderComposer("chatComposer startComposer")}
               <div className="promptChips">
-                <button type="button" onClick={() => setTaskText("读取 requirements.txt")}>
-                  <FileText size={16} />
-                  读取文件
-                </button>
-                <button type="button" onClick={() => setTaskText("帮我写一份项目总结")}>
-                  <Pencil size={16} />
-                  撰写或编辑
-                </button>
-                <button type="button" onClick={() => setTaskText("查询上海当前时间")}>
-                  <Globe2 size={16} />
-                  调用 MCP
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskText(
+                      "扫描 workspace_files/inbox 目录，读取其中的文本或 csv 文件内容，并生成一份 markdown 文件整理报告。报告保存到 reports/inbox_report.md。"
+                    )
+                  }
+                >
+                  <FolderOpen size={16} />
+                  整理文件夹
                 </button>
                 <button
                   type="button"
                   onClick={() =>
-                    setTaskText("先列出当前目录，再读取 requirements.txt，然后总结依赖")
+                    setTaskText("读取 workspace_files/inbox 下的文本文件，提取重点并生成摘要。")
                   }
                 >
-                  <Wrench size={16} />
-                  多工具测试
+                  <FileText size={16} />
+                  总结文件
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskText(
+                      "根据已读取或整理的内容，生成一份结构清晰的 Markdown 报告并保存到 reports/inbox_report.md。"
+                    )
+                  }
+                >
+                  <Pencil size={16} />
+                  写入报告
+                </button>
+                <button type="button" onClick={() => setTaskText("查询上海当前时间")}>
+                  <Globe2 size={16} />
+                  查询时间
                 </button>
               </div>
             </div>
@@ -1047,15 +1146,16 @@ export default function App() {
                     className={`messageRow ${isUserMessage ? "user" : "assistant"}`}
                     key={message.id}
                   >
-                    <div className={`avatar ${isUserMessage ? "userAvatar" : "botAvatar"}`}>
-                      {isUserMessage ? <User size={18} /> : <Bot size={18} />}
-                    </div>
                     <div
                       className={`messageBubble ${
                         isUserMessage ? "userBubble" : "assistantBubble final"
                       }`}
                     >
-                      {isUserMessage ? <p>{message.content}</p> : <pre>{message.content}</pre>}
+                      {isUserMessage ? (
+                        <p>{message.content}</p>
+                      ) : (
+                        <MarkdownMessage content={message.content} />
+                      )}
                       {isUserMessage && <span>{formatTime(message.created_at)}</span>}
                     </div>
                   </article>
@@ -1063,7 +1163,7 @@ export default function App() {
               })}
 
               {needsApproval && (
-                <article className="messageRow assistant">
+                <article className="messageRow assistant withAvatar">
                   <div className="avatar approvalAvatar">
                     <ShieldAlert size={18} />
                   </div>
@@ -1100,21 +1200,48 @@ export default function App() {
 
               {shouldShowLiveAssistant && (
                 <article className="messageRow assistant">
-                  <div className="avatar botAvatar">
-                    <Bot size={18} />
-                  </div>
                   <div className="messageBubble assistantBubble final">
-                    <pre>
-                      {selectedTask?.final_response ??
+                    <MarkdownMessage
+                      content={
+                        selectedTask?.final_response ??
                         (selectedTask && isTerminalStatus(selectedTask.status)
                           ? "任务还没有生成最终回复。"
-                          : "正在生成回复...")}
-                    </pre>
+                          : "正在生成回复...")
+                      }
+                    />
                   </div>
                 </article>
               )}
 
               {selectedTask && (
+                <article className="agentCompactControls" aria-label="Agent 执行状态入口">
+                  <button
+                    className="progressToggleButton"
+                    onClick={() => setShowProgress((value) => !value)}
+                    type="button"
+                  >
+                    <Clock3 size={16} />
+                    {showProgress ? "隐藏执行状态" : "查看执行状态"}
+                    <span>{currentProgressTitle}</span>
+                    <b className={`timelineState ${currentTimelineStep?.state ?? "pending"}`}>
+                      {getTimelineStateLabel(currentTimelineStep?.state ?? "pending")}
+                    </b>
+                  </button>
+                  <button
+                    className="traceToggleButton"
+                    onClick={() => setShowTrace((value) => !value)}
+                    type="button"
+                  >
+                    <Clock3 size={16} />
+                    {showTrace ? "隐藏详细日志" : "查看详细日志"}
+                    <span>
+                      {orderedLogs.length} 条日志 · {orderedToolCalls.length} 次工具调用
+                    </span>
+                  </button>
+                </article>
+              )}
+
+              {showProgress && selectedTask && (
                 <article className="messageRow assistant progressRow">
                   <div className="avatar traceAvatar">
                     <Clock3 size={17} />
@@ -1141,22 +1268,6 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                </article>
-              )}
-
-              {selectedTask && (
-                <article className="traceToggleRow">
-                  <button
-                    className="traceToggleButton"
-                    onClick={() => setShowTrace((value) => !value)}
-                    type="button"
-                  >
-                    <Clock3 size={16} />
-                    {showTrace ? "隐藏详细日志" : "查看详细日志"}
-                    <span>
-                      {orderedLogs.length} 条日志 · {orderedToolCalls.length} 次工具调用
-                    </span>
-                  </button>
                 </article>
               )}
 

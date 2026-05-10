@@ -58,6 +58,15 @@ export interface ToolDefinition {
   enabled: boolean;
 }
 
+export interface UploadedFile {
+  filename: string;
+  stored_name: string;
+  path: string;
+  display_path: string;
+  size: number;
+  content_type: string | null;
+}
+
 export interface TaskRunResult {
   status?: TaskStatus;
   selected_tool?: string;

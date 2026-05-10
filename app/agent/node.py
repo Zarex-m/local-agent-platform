@@ -13,6 +13,43 @@ LOG_WAITING_APPROVAL = "waiting_approval"
 LOG_FAILED = "failed"
 LOG_SKIPPED = "skipped"
 
+PERSISTENT_ACTION_KEYWORDS = [
+    "保存",
+    "写入",
+    "生成文件",
+    "输出到",
+    "移动",
+    "复制",
+    "重命名",
+    "归档",
+    "报告保存",
+    "reports/",
+]
+
+PERSISTENT_ACTION_TOOLS = {
+    "write_file",
+    "mcp.workspace.write_markdown_report",
+    "mcp.workspace.move_file",
+    "mcp.workspace.copy_file",
+    "mcp.workspace.rename_file",
+}
+
+MAX_STEP_RETRIES = 2
+
+RECOVERABLE_ERROR_KEYWORDS = [
+    "not found",
+    "no such file",
+    "不存在",
+    "路径",
+    "path",
+    "required",
+    "missing",
+    "invalid",
+    "参数",
+    "未知工具",
+    "停用",
+]
+
 
 def append_runtime_log(state: AgentState, node: str, status: str, message: str) -> None:
     task_id = state.get("task_id")
@@ -23,6 +60,57 @@ def append_runtime_log(state: AgentState, node: str, status: str, message: str) 
         task_repo.append_step_log(task_id, node, status, message)
     except Exception:
         pass
+
+
+def task_requires_persistent_action(state: AgentState) -> bool:
+    task_text = state.get("Task", "")
+    criteria_text = " ".join(str(item) for item in state.get("completion_criteria", []))
+    combined_text = f"{task_text}\n{criteria_text}"
+
+    return any(keyword in combined_text for keyword in PERSISTENT_ACTION_KEYWORDS)
+
+
+def has_successful_persistent_action(state: AgentState) -> bool:
+    for item in state.get("tool_history", []):
+        tool_name = item.get("tool_name", "")
+        tool_output = item.get("tool_output", {})
+
+        if tool_name not in PERSISTENT_ACTION_TOOLS:
+            continue
+
+        if tool_output.get("success"):
+            return True
+
+    return False
+
+
+def get_tool_error_text(tool_output: dict) -> str:
+    if not isinstance(tool_output, dict):
+        return str(tool_output)
+
+    error = (
+        tool_output.get("error")
+        or tool_output.get("message")
+        or tool_output.get("data")
+        or tool_output
+    )
+    return str(error)
+
+
+def is_recoverable_tool_failure(tool_output: dict) -> bool:
+    error_text = get_tool_error_text(tool_output).lower()
+    return any(keyword.lower() in error_text for keyword in RECOVERABLE_ERROR_KEYWORDS)
+
+
+def get_completion_blocker(state: AgentState) -> str | None:
+    if task_requires_persistent_action(state) and not has_successful_persistent_action(state):
+        return "任务要求保存、写入或生成文件，但没有成功的持久化工具调用。"
+
+    tool_output = state.get("tool_output", {})
+    if isinstance(tool_output, dict) and tool_output.get("success") is False:
+        return f"最后一次工具调用失败：{get_tool_error_text(tool_output)}"
+
+    return None
 
 # plan
 def plan_task(state: AgentState) -> dict:
@@ -37,24 +125,50 @@ def plan_task(state: AgentState) -> dict:
 用户任务：
 {state["Task"]}
 
-请只生成 3-5 步内部执行计划。
+请生成 3-6 步内部执行计划，并给出任务完成条件。
 要求：
 1. 不要回答用户问题
 2. 不要写教程
-3. 不要写 Markdown 表格
-4. 每一步只保留一句话
+3. 每一步只保留一句话
+4. 如果用户要求保存、写入、移动、复制、重命名或生成文件，计划中必须包含对应的执行步骤
+5. 如果用户要求把内容保存到某个路径，完成条件必须包含“目标文件已成功写入”
+6. 不要把“生成内容”误判为“已保存文件”
 对话历史：
 {state.get("conversation_context", "")}
 
+请只返回 JSON，不要解释，不要 Markdown，不要代码块。
+JSON 格式：
+{{
+  "steps": [
+    {{"description": "第一步", "type": "tool"}},
+    {{"description": "第二步", "type": "reasoning"}}
+  ],
+  "completion_criteria": [
+    "完成条件 1",
+    "完成条件 2"
+  ]
+}}
 """
 
-    try:
-        plan_content = invoke_llm(prompt)
-    except Exception as e:
+    result = invoke_llm_json(
+        prompt,
+        default={
+            "steps": [
+                {
+                    "description": "使用可用工具完成用户任务",
+                    "type": "tool",
+                }
+            ],
+            "completion_criteria": ["用户任务已被实际完成"],
+        },
+    )
+
+    if result.get("_error"):
         default_steps = [
             {
                 "index": 1,
                 "description": "使用可用工具完成用户任务",
+                "type": "tool",
                 "status": "pending",
             }
         ]
@@ -62,30 +176,40 @@ def plan_task(state: AgentState) -> dict:
             "plan": ["模型调用失败,使用可用工具完成用户任务"],
             "plan_steps": default_steps,
             "current_step": default_steps[0],
+            "completion_criteria": ["用户任务已被实际完成"],
             "status": "planned",
-            "error": f"plan_task 模型调用失败：{str(e)}",
+            "error": f"plan_task 模型调用失败：{result['_error']}",
             "step_logs": [
                 {
                     "node": "plan_task",
-                    "message": f"模型调用失败，使用默认计划：{str(e)}",
+                    "message": f"模型调用失败，使用默认计划：{result['_error']}",
                     "status": LOG_SUCCESS,
                 }
             ],
         }
-    raw_steps = [line.strip() for line in plan_content.split("\n") if line.strip()]
+
+    raw_steps = result.get("steps", [])
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raw_steps = [{"description": "使用可用工具完成用户任务", "type": "tool"}]
 
     plan_steps = [
         {
             "index": index + 1,
-            "description": step,
+            "description": step.get("description", str(step)) if isinstance(step, dict) else str(step),
+            "type": step.get("type", "tool") if isinstance(step, dict) else "tool",
             "status": "pending",
         }
-        for index, step in enumerate(raw_steps)
+        for index, step in enumerate(raw_steps[:6])
     ]
+    completion_criteria = result.get("completion_criteria", [])
+    if not isinstance(completion_criteria, list):
+        completion_criteria = [str(completion_criteria)]
+
     return {
-        "plan": raw_steps,
+        "plan": [step["description"] for step in plan_steps],
         "plan_steps": plan_steps,
         "current_step": plan_steps[0] if plan_steps else {},
+        "completion_criteria": completion_criteria,
         "status": "planned",
         "step_logs": [
             {"node": "plan_task", "message": "生成结构化任务计划", "status": LOG_SUCCESS}
@@ -117,6 +241,9 @@ def select_tool(state: AgentState) -> dict:
 当前应执行步骤：
 {state.get("current_step", {})}
 
+任务完成条件：
+{state.get("completion_criteria", [])}
+
 已执行工具历史：
 {state.get("tool_history", [])}
 
@@ -130,23 +257,24 @@ def select_tool(state: AgentState) -> dict:
 {state.get("conversation_context", "")}
 
 
-工具选择规则：
-1. 如果用户要列出目录、查看目录下有哪些文件、查看项目结构，选择 list_files。
-2. 如果用户要读取、查看、总结、分析某个文件的内容，必须选择 read_file。
-3. 如果用户要创建、写入、修改、覆盖某个文件，选择 write_file。
-4. 如果用户的问题不需要访问文件、不需要执行真实操作，选择 mock_tool。
-5. 不要选择不存在于可用工具列表中的工具。
-6. 工具参数必须严格匹配该工具的参数说明。
-7.如果用户要执行 shell 命令、运行测试、运行脚本、安装依赖、查看命令输出，选择 run_shell。
-8.如果用户要访问 URL、请求 API、测试 HTTP 接口、发送 GET/POST/PUT/DELETE 请求，选择 http_request。
-9.如果任务适合某个 MCP 工具，并且该工具出现在可用工具列表中，可以选择名称以 mcp. 开头的工具。
-10. 如果已执行工具历史已经满足用户任务，不要重复选择相同工具。
-11. 如果任务需要多步完成，请根据历史结果选择下一步工具。
-12. 如果用户要求先做 A 再做 B，应按顺序选择尚未执行的下一步工具。
-13. 优先根据 current_step 选择工具，而不是重新理解整个任务。
-14. 如果 current_step 是读取文件，选择 read_file。
-15. 如果 current_step 是列出目录，选择 list_files。
-16. 如果 current_step 是总结、分析、回答，并且已有工具历史足够支撑，可以选择 mock_tool 并设置 need_tool 为 false。
+工具域优先级：
+1. workspace_files、workspace、工作区文件、inbox、reports 等工作区任务，优先使用 mcp.workspace.* 工具。
+2. 项目根目录下的普通文件任务，使用 list_files、read_file、write_file。
+3. shell 命令、测试、脚本、安装依赖、查看命令输出，使用 run_shell。
+4. URL、HTTP API、网页请求，使用 http_request。
+5. 不需要真实工具、只需要基于已有历史组织最终回答时，选择 mock_tool 并设置 need_tool=false。
+
+工具选择原则：
+1. 不要选择不存在于可用工具列表中的工具。
+2. 工具参数必须严格匹配该工具的参数说明。
+3. 优先根据 current_step 和 completion_criteria 选择下一步工具。
+4. 如果已执行工具历史已经满足当前步骤，不要重复选择相同工具。
+5. 如果任务需要保存、写入、移动、复制、重命名或生成文件，不能只返回内容，必须继续选择能完成该动作的工具。
+6. 如果任务要求保存 markdown 报告到 workspace_files 或 reports/*.md，选择 mcp.workspace.write_markdown_report。
+7. workspace MCP 工具的路径参数都是相对 workspace_files 的路径，例如 workspace_files/inbox/c.csv 应传入 inbox/c.csv。
+8. read_file/write_file 只用于项目根目录文件，不用于 workspace_files 工作区任务。
+9. 如果 current_step 中有 last_error，说明上一次工具调用失败，不要原样重复上一轮 tool_input。
+10. 遇到 last_error 时，必须根据错误原因修正路径、参数或更换工具；如果是 workspace_files 路径问题，优先使用相对 workspace_files 的路径。
 
 路径参数规则：
 1. 如果用户明确给出文件名或目录名，必须提取为 path。
@@ -428,7 +556,22 @@ def execute_tool(state: AgentState) -> dict:
         }
 
     handler = tool_info["handler"]
-    tool_output = handler(tool_input)
+
+    try:
+        tool_output = handler(tool_input)
+    except Exception as exc:
+        tool_output = {
+            "success": False,
+            "data": None,
+            "error": f"工具执行异常：{str(exc)}",
+        }
+
+    if not isinstance(tool_output, dict):
+        tool_output = {
+            "success": False,
+            "data": tool_output,
+            "error": "工具返回了非结构化结果",
+        }
 
     next_iterations = state.get("iterations", 0) + 1
 
@@ -478,6 +621,43 @@ def update_plan_step(state: AgentState) -> dict:
         }
 
     current_index = current_step.get("index")
+    tool_success = bool(tool_output.get("success"))
+    retry_count = int(current_step.get("retry_count", 0) or 0)
+    can_retry = (
+        not tool_success
+        and retry_count < MAX_STEP_RETRIES
+        and is_recoverable_tool_failure(tool_output)
+    )
+
+    if can_retry:
+        next_retry_count = retry_count + 1
+        retry_step = {
+            **current_step,
+            "status": "pending",
+            "retry_count": next_retry_count,
+            "last_error": get_tool_error_text(tool_output),
+        }
+        updated_steps = [
+            retry_step if step.get("index") == current_index else step
+            for step in plan_steps
+        ]
+
+        return {
+            "plan_steps": updated_steps,
+            "current_step": retry_step,
+            "status": "plan_updated",
+            "step_logs": [
+                {
+                    "node": "update_plan_step",
+                    "message": (
+                        f"步骤 {current_index} 执行失败但可恢复，"
+                        f"准备第 {next_retry_count}/{MAX_STEP_RETRIES} 次重试："
+                        f"{get_tool_error_text(tool_output)}"
+                    ),
+                    "status": LOG_SUCCESS,
+                }
+            ],
+        }
 
     updated_steps = []
     for step in plan_steps:
@@ -485,7 +665,9 @@ def update_plan_step(state: AgentState) -> dict:
             updated_steps.append(
                 {
                     **step,
-                    "status": "completed" if tool_output.get("success") else "failed",
+                    "status": "completed" if tool_success else "failed",
+                    "last_error": None if tool_success else get_tool_error_text(tool_output),
+                    "retry_count": retry_count,
                 }
             )
         else:
@@ -520,32 +702,41 @@ def decide_next_step(state: AgentState) -> dict:
     max_iterations = state.get("max_iterations", 3)
 
     if iterations >= max_iterations:
+        message = f"已达到最大执行轮次 {max_iterations}，结束任务"
+        if task_requires_persistent_action(state) and not has_successful_persistent_action(state):
+            message = f"已达到最大执行轮次 {max_iterations}，但持久化动作尚未完成，结束任务"
+
         return {
             "next_action": "finish",
             "status": "decided",
             "step_logs": [
                 {
                     "node": "decide_next_step",
-                    "message": f"已达到最大执行轮次 {max_iterations}，结束任务",
+                    "message": message,
                     "status": LOG_SUCCESS,
                 }
             ],
         }
     
     current_step = state.get("current_step", {})
-    plan_steps = state.get("plan_steps", [])
-    if not current_step:
-        return{
-            "next_action": "finish",
-            "status": "decided",
-            "step_logs": [{
-                "node": "decide_next_step",
-                "message": f"没有当前步骤，结束任务",
-                "status": LOG_SUCCESS,
-            }]
-        }
-    
+
     if not state.get("tool_output", {}).get("success", False):
+        if current_step.get("retry_count", 0) > 0:
+            return {
+                "next_action": "continue",
+                "status": "decided",
+                "step_logs": [
+                    {
+                        "node": "decide_next_step",
+                        "message": (
+                            "工具执行失败但当前步骤仍可重试，"
+                            f"继续修正工具参数：{current_step.get('last_error', '无错误详情')}"
+                        ),
+                        "status": LOG_SUCCESS,
+                    }
+                ],
+            }
+
         return {
             "next_action": "finish",
             "status": "decided",
@@ -558,19 +749,28 @@ def decide_next_step(state: AgentState) -> dict:
             ],
         }
 
-    current_step_description = str(current_step.get("description", ""))
-    finish_keywords = ["总结", "分析", "回答", "回复", "归纳", "说明", "解析"]
-    if any(keyword in current_step_description for keyword in finish_keywords):
+    if task_requires_persistent_action(state) and not has_successful_persistent_action(state):
         return {
-            "next_action": "finish",
+            "next_action": "continue",
             "status": "decided",
             "step_logs": [
                 {
                     "node": "decide_next_step",
-                    "message": f"当前步骤适合直接生成最终回答：{current_step}",
+                    "message": "任务要求保存/写入/移动等持久化动作，但尚未看到成功工具调用，继续执行",
                     "status": LOG_SUCCESS,
                 }
             ],
+        }
+
+    if not current_step:
+        return{
+            "next_action": "finish",
+            "status": "decided",
+            "step_logs": [{
+                "node": "decide_next_step",
+                "message": f"没有当前步骤，结束任务",
+                "status": LOG_SUCCESS,
+            }]
         }
 
     if current_step and state.get("tool_output", {}).get("success"):
@@ -595,6 +795,9 @@ def decide_next_step(state: AgentState) -> dict:
 执行计划：
 {state.get("plan", [])}
 
+任务完成条件：
+{state.get("completion_criteria", [])}
+
 已执行工具历史：
 {state.get("tool_history", [])}
 
@@ -607,10 +810,12 @@ def decide_next_step(state: AgentState) -> dict:
 请判断用户任务是否已经完成。
 
 判断规则：
-1. 如果工具历史已经足够回答用户任务，返回 finish。
-2. 如果用户任务明确包含多个步骤，并且还有步骤没有执行，返回 continue。
-3. 如果继续执行也不会获得更多有用信息，返回 finish。
-4. 如果不确定，优先返回 finish，避免重复循环。
+1. 如果所有任务完成条件已经满足，返回 finish。
+2. 如果用户要求保存、写入、移动、复制、重命名或生成文件，但历史中没有对应成功工具调用，返回 continue。
+3. 如果用户任务明确包含多个步骤，并且还有步骤没有执行，返回 continue。
+4. 如果工具历史已经足够回答用户任务，返回 finish。
+5. 如果继续执行也不会获得更多有用信息，返回 finish。
+6. 如果不确定，优先根据 completion_criteria 判断，不要仅因为已经生成文本内容就 finish。
 
 只返回 JSON，不要解释，不要 Markdown。
 格式：
@@ -676,7 +881,34 @@ def finalize_task(state: AgentState) -> dict:
             ],
         }
 
-    final_status = "completed" if tool_output.get("success") else "failed"
+    if state.get("status") == "rejected":
+        return {
+            "final_response": state.get("approval_reason", "用户拒绝了工具使用请求，任务已停止。"),
+            "status": "rejected",
+            "step_logs": [
+                {
+                    "node": "finalize_task",
+                    "message": "任务已被用户拒绝，保持 rejected 状态",
+                    "status": LOG_FAILED,
+                }
+            ],
+        }
+
+    if state.get("status") == "cancelled":
+        return {
+            "final_response": state.get("final_response", "任务已取消。"),
+            "status": "cancelled",
+            "step_logs": [
+                {
+                    "node": "finalize_task",
+                    "message": "任务已取消，保持 cancelled 状态",
+                    "status": LOG_SKIPPED,
+                }
+            ],
+        }
+
+    completion_blocker = get_completion_blocker(state)
+    final_status = "failed" if completion_blocker else "completed"
 
     prompt = f"""
 根据工具执行结果，生成对用户的最终响应。
@@ -689,6 +921,9 @@ def finalize_task(state: AgentState) -> dict:
 
 结构化计划完成情况：
 {state.get("plan_steps", [])}
+
+任务完成条件：
+{state.get("completion_criteria", [])}
 
 工具名称：
 {state.get("selected_tool", "")}
@@ -704,10 +939,37 @@ def finalize_task(state: AgentState) -> dict:
 对话历史：
 {state.get("conversation_context", "")}
 
+完成阻塞原因：
+{completion_blocker or "无"}
+
 要求：
-1. 用简洁中文回答
-2. 如果工具执行失败，说明失败原因
-3. 不要编造工具结果中没有的信息
+1. 像桌面助手一样回复用户，不要暴露 plan_task、select_tool、execute_tool、update_plan_step 等内部节点名。
+2. 如果完成阻塞原因为“无”，第一句话直接说“已完成。”
+3. 如果完成阻塞原因不为“无”，第一句话直接说“未完成。”
+4. 成功时重点说明最终结果；如果生成或保存了文件，明确给出文件路径。
+5. 失败时说明失败原因和下一步建议。
+6. 不要编造工具结果中没有的信息。
+7. 不要把“已生成内容”说成“已保存文件”。
+8. 详细执行过程已经在前端“查看执行状态/查看详细日志”里展示，最终回复只保留结果。
+
+建议格式：
+成功：
+已完成。
+
+结果：
+- ...
+
+文件：
+- ...
+
+失败：
+未完成。
+
+原因：
+- ...
+
+建议：
+- ...
 """
 
     final_response = ""

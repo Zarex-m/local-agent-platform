@@ -396,24 +396,38 @@ h2 {
 }
 
 .messageRow {
+  display: flex;
+  margin: 0 0 22px;
+}
+
+.messageRow.assistant {
+  justify-content: flex-start;
+}
+
+.messageRow.user {
+  justify-content: flex-end;
+}
+
+.messageRow.withAvatar,
+.messageRow.progressRow,
+.messageRow.tracePanelRow {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   gap: 14px;
   margin: 0 0 18px;
 }
 
-.messageRow.user {
-  grid-template-columns: minmax(0, 1fr) 36px;
+.messageRow.withAvatar {
+  justify-content: stretch;
 }
 
-.messageRow.user .avatar {
-  grid-column: 2;
-  grid-row: 1;
+.messageRow.progressRow,
+.messageRow.tracePanelRow {
+  justify-content: stretch;
 }
 
 .messageRow.user .messageBubble {
-  grid-column: 1;
-  justify-self: end;
+  align-self: flex-end;
 }
 
 .avatar {
@@ -475,16 +489,113 @@ h2 {
 }
 
 .assistantBubble.final {
+  width: min(760px, 100%);
   padding: 4px 0 8px;
   border: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.assistantBubble.final pre {
-  font-family: inherit;
+.markdownBody {
+  color: #202123;
   font-size: 15px;
   line-height: 1.72;
+}
+
+.markdownBody > :first-child {
+  margin-top: 0;
+}
+
+.markdownBody > :last-child {
+  margin-bottom: 0;
+}
+
+.markdownBody p {
+  margin: 0 0 12px;
+}
+
+.markdownBody h1,
+.markdownBody h2,
+.markdownBody h3 {
+  margin: 22px 0 10px;
+  color: #202123;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.markdownBody h1 {
+  font-size: 24px;
+}
+
+.markdownBody h2 {
+  font-size: 19px;
+}
+
+.markdownBody h3 {
+  font-size: 16px;
+}
+
+.markdownBody ul,
+.markdownBody ol {
+  margin: 0 0 12px;
+  padding-left: 1.4rem;
+}
+
+.markdownBody li {
+  margin: 3px 0;
+  padding-left: 2px;
+}
+
+.markdownBody blockquote {
+  margin: 12px 0;
+  padding-left: 12px;
+  color: #565b66;
+  border-left: 3px solid #d9d9e3;
+}
+
+.markdownBody code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: #202123;
+  background: #f1f1f3;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.markdownBody pre {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #f7f7f8;
+  white-space: pre;
+  overflow: auto;
+}
+
+.markdownBody pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.62;
+}
+
+.markdownBody table {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.markdownBody th,
+.markdownBody td {
+  padding: 8px 10px;
+  border: 1px solid #e1e1e6;
+  text-align: left;
+}
+
+.markdownBody th {
+  background: #f7f7f8;
+  font-weight: 700;
 }
 
 .toolSummary {
@@ -507,11 +618,14 @@ h2 {
   font-weight: 700;
 }
 
-.traceToggleRow {
+.agentCompactControls {
   display: flex;
-  margin: -8px 0 18px 50px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 18px 50px;
 }
 
+.progressToggleButton,
 .traceToggleButton {
   display: inline-flex;
   align-items: center;
@@ -526,14 +640,21 @@ h2 {
   font-weight: 700;
 }
 
+.progressToggleButton:hover,
 .traceToggleButton:hover {
   background: #f6f6f7;
 }
 
+.progressToggleButton span,
 .traceToggleButton span {
   color: #8e8ea0;
   font-size: 12px;
   font-weight: 600;
+}
+
+.progressToggleButton .timelineState {
+  min-height: 22px;
+  padding: 2px 8px;
 }
 
 .progressRow {
@@ -1012,26 +1133,6 @@ h2 {
   line-height: 1.45;
 }
 
-.toolDefinitionCard details {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fbfbfc;
-}
-
-.toolDefinitionCard summary {
-  padding: 8px 10px;
-  color: #4b5563;
-  font-size: 12px;
-  font-weight: 800;
-  list-style-position: inside;
-}
-
-.toolDefinitionCard pre {
-  max-height: 240px;
-  padding: 0 10px 10px;
-  font-size: 12px;
-}
-
 .traceBubble {
   border: 1px solid #e4e4e8;
   color: #353740;
@@ -1177,6 +1278,59 @@ pre {
   color: #8e8ea0;
 }
 
+.fileInput {
+  display: none;
+}
+
+.attachmentList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+
+.attachmentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid #e2e4e8;
+  border-radius: 999px;
+  color: #353740;
+  background: #f8f9fb;
+  font-size: 12px;
+}
+
+.attachmentChip span {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentChip small {
+  color: #8e8ea0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.attachmentChip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  color: #69707a;
+  background: transparent;
+}
+
+.attachmentChip button:hover {
+  background: #e9ebef;
+}
+
 .composerBar {
   display: flex;
   flex: 0 0 30px;
@@ -1193,7 +1347,6 @@ pre {
 }
 
 .toolButton,
-.modeButton,
 .promptChips button {
   display: inline-flex;
   align-items: center;
@@ -1209,18 +1362,13 @@ pre {
   border-radius: 999px;
 }
 
-.toolButton:hover,
-.modeButton:hover {
+.toolButton:hover {
   background: #f1f1f3;
 }
 
-.modeButton {
-  gap: 7px;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  color: #1473e6;
-  font-weight: 500;
+.toolButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .sendButton {
@@ -1307,18 +1455,24 @@ pre {
 }
 
 @media (max-width: 560px) {
-  .messageRow,
-  .messageRow.user {
+  .agentCompactControls {
+    margin-left: 0;
+  }
+
+  .messageRow.withAvatar,
+  .messageRow.progressRow,
+  .messageRow.tracePanelRow {
     grid-template-columns: 1fr;
   }
 
-  .avatar {
+  .messageRow.withAvatar .avatar,
+  .messageRow.progressRow .avatar,
+  .messageRow.tracePanelRow .avatar {
     display: none;
   }
 
   .messageRow.user .messageBubble {
-    grid-column: auto;
-    justify-self: stretch;
+    align-self: stretch;
   }
 
   .chatComposer {

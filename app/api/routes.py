@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter,HTTPException,BackgroundTasks
 from app.services.agent_service import (
     run_task,
@@ -20,17 +22,62 @@ from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = PROJECT_ROOT / "workspace_files"
+
+
+def normalize_attachment_path(path: str) -> str:
+    candidate = Path(path)
+
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise HTTPException(status_code=400, detail="附件路径不合法")
+
+    relative_path = candidate.as_posix().lstrip("/")
+
+    if not relative_path.startswith("uploads/"):
+        raise HTTPException(status_code=400, detail="附件必须来自上传目录")
+
+    target_path = (WORKSPACE_ROOT / relative_path).resolve()
+
+    if not target_path.is_relative_to(WORKSPACE_ROOT.resolve()):
+        raise HTTPException(status_code=400, detail="附件路径越界")
+
+    if not target_path.exists():
+        raise HTTPException(status_code=400, detail=f"附件不存在: {relative_path}")
+
+    return relative_path
+
+
+def build_task_with_attachments(task: str, attachment_paths: list[str]) -> str:
+    if not attachment_paths:
+        return task
+
+    normalized_paths = [normalize_attachment_path(path) for path in attachment_paths]
+    files_text = "\n".join(
+        f"- workspace_files/{path}，工具调用时使用相对路径：{path}"
+        for path in normalized_paths
+    )
+
+    return f"""{task}
+
+用户上传了以下文件：
+{files_text}
+
+请优先使用 workspace MCP 文件工具读取这些文件。"""
+
+
 @router.post("/")
 async def submit_task(request: TaskCreateRequest,background_tasks: BackgroundTasks):
+    agent_task = build_task_with_attachments(request.task, request.attachment_paths)
     payload = create_task_job(request.task, request.conversation_id)
 
     background_tasks.add_task(
-    run_task_background,
-    payload["task_id"],
-    payload["thread_id"],
-    request.task,
-    payload["conversation_id"],
-)
+        run_task_background,
+        payload["task_id"],
+        payload["thread_id"],
+        agent_task,
+        payload["conversation_id"],
+    )
     
     return payload
 

@@ -1,9 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 class TaskCreateRequest(BaseModel):
     task: str
     conversation_id: int | None = None
+    attachment_paths: list[str] = Field(default_factory=list)
 
 
 class TaskApproveRequest(BaseModel):
@@ -67,3 +68,12 @@ class ToolDefinitionResponse(BaseModel):
 
 class ToolUpdateRequest(BaseModel):
     enabled: bool
+
+
+class UploadedFileResponse(BaseModel):
+    filename: str
+    stored_name: str
+    path: str
+    display_path: str
+    size: int
+    content_type: str | None = None
